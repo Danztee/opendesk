@@ -77,6 +77,9 @@ fetches them with `GET /v1/events?since=<last_seq>`.
 | `ai_agent_review.updated` | agents | — | `{ "message_id", "ticket_id", "outcome": "dismissed" \| "improved" }`: an agent reply left the review queue |
 | `billing.updated`        | agents     | —                                     | `Billing` (`contracts/billing.md`): plan, status, seats, limits, usage, AI balance, prices. Sent on subscription changes, seat syncs, AI top-ups and recharges |
 | `saved_reply.*`, `view.*`, `automation.*`, `sla_policy.*`, `kb_article.*`, `kb_collection.*`, `team.*`, `webhook.*` | agents | — | `{ "<resource>": Obj }` / `{ "<resource>_id" }` |
+| `brand.created` / `brand.updated` / `brand.deleted` | agents | — | `{ "brand": Brand }` / `{ "brand_id" }` |
+| `routing_rule.created` / `routing_rule.updated` / `routing_rule.deleted` | agents | — | `{ "routing_rule": RoutingRule }` / `{ "routing_rule_id" }` |
+| `widget.created` / `widget.updated` / `widget.deleted` | agents | — | `{ "widget": Widget }` / `{ "widget_id" }` |
 | `email_template.updated` | agents | — | `{ "brand_id", "kind": "layout" \| "csat" }` (contracts/templates.md): a brand's email layout or CSAT email was saved or reset; refetch it |
 | `bot.created` / `bot.updated` / `bot.deleted` | agents | — | `{ "bot": Bot }` / `{ "bot_id" }` (contracts/bots.md); a new default, a reorder or a new picture is `bot.updated` of each bot it changed |
 | `integration.created` / `integration.updated` / `integration.deleted` | agents | — | `{ "integration": Integration }` / `{ "integration_id" }` (`contracts/integrations.md`; never credentials) |
