@@ -86,7 +86,7 @@ export async function run(t) {
     await owner.getByLabel("Name").fill("Tag refund requests");
     // A new automation starts with one "subject contains" condition and one "add tag" action.
     await owner.getByLabel("Subject value").fill("refund");
-    await owner.getByRole("button", { name: "Choose a tag" }).click();
+    await owner.getByRole("button", { name: "Choose a label" }).click();
     await owner.keyboard.type("refund");
     await owner.getByRole("option", { name: /refund/i }).first().click();
     await owner.getByRole("button", { name: "Create automation" }).click();
