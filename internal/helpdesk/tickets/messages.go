@@ -63,6 +63,7 @@ func str(s *string) string {
 
 func registerMessages(d *deps.Deps, api huma.API) {
 	tags := []string{"Tickets"}
+	registerMessageMutations(d, api, tags)
 
 	huma.Register(api, huma.Operation{OperationID: "list-ticket-messages", Method: http.MethodGet, Path: "/v1/tickets/{id}/messages",
 		Summary: "List a ticket's messages", Description: "Oldest first, notes included.", Tags: tags},

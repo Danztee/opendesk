@@ -508,6 +508,7 @@ export function buildMessage(ws: WsData, t: Ticket, m: NewMessage): Message {
     auth_failed: inbound && isEmail && !!m.auth_failed,
     form_sender: inbound && isEmail ? (m.form_sender ?? "") : "",
     created_at: at,
+    edited_at: null,
   };
   if (msg.delivery_status === "failed" && !msg.delivery_error) msg.delivery_error = "550 5.1.1 Recipient address rejected";
   return msg;

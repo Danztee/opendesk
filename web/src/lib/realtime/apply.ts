@@ -227,6 +227,13 @@ export function applyEnvelope(qc: QueryClient, env: Envelope, ctx: ApplyContext)
       }
       return;
     }
+    case "message.deleted": {
+      const tid = d.ticket_id as string | undefined;
+      const id = d.message_id as string | undefined;
+      if (!tid || !id) return;
+      qc.setQueryData<Message[]>(qk.messages(tid), (old) => old?.filter((m) => m.id !== id));
+      return;
+    }
     case "ai_suggested_reply.created":
     case "ai_suggested_reply.updated": {
       const s = d.suggested_reply as SuggestedReply | undefined;

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Hand, ShieldAlert, Sparkles, ArrowRightLeft, CircleDot, GitMerge, Link2, MessagesSquare, PencilLine, Star, Tag as TagIcon, TimerOff, Users, UserRound } from "lucide-react";
+import { AlarmClock, Hand, ShieldAlert, Sparkles, ArrowRightLeft, CircleDot, GitMerge, Link2, MessagesSquare, PencilLine, Star, Tag as TagIcon, TimerOff, Trash2, Users, UserRound } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -90,6 +90,10 @@ function describe(a: Activity, t: TFunction<"inbox">, { teams, members, tags, fi
     <Trans t={t} i18nKey={key as never} values={{ who, ...values }} components={{ b: B, m: M }} />
   );
   switch (a.type) {
+    case "note_edited":
+      return { icon: <PencilLine />, text: line("activity.noteEdited") };
+    case "note_deleted":
+      return { icon: <Trash2 />, text: line("activity.noteDeleted") };
     case "status_changed": {
       const to = d.to as TicketStatus;
       if (d.reason === "thread_replied") {

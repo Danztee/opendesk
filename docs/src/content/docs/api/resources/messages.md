@@ -3,12 +3,14 @@ title: Messages and attachments
 description: Read a ticket's conversation, send replies and notes, and upload attachments.
 ---
 
-Scopes: `tickets:read` to read, `tickets:write` to send.
+Scopes: `tickets:read` to read, `tickets:write` to send, edit or delete.
 
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/v1/tickets/{id}/messages` | All messages, ascending |
 | `POST` | `/v1/tickets/{id}/messages` | Send a reply or add a note |
+| `PATCH` | `/v1/tickets/{id}/messages/{messageId}` | Edit your own internal note |
+| `DELETE` | `/v1/tickets/{id}/messages/{messageId}` | Delete your own internal note; admins can delete any note |
 | `GET` | `/v1/messages/{id}/original` | The full original, including quoted history |
 | `POST` | `/v1/attachments` | Upload a file |
 | `GET` | `/v1/attachments/{id}` | Download a file |
@@ -38,6 +40,7 @@ type Message = {
   auth_failed: boolean;
   form_sender: string;
   created_at: string;
+  edited_at: string | null;
 };
 ```
 
@@ -80,6 +83,19 @@ curl https://api.opendesk.sh/v1/tickets/1042/messages \
 ```
 
 Notes are never sent to the customer.
+
+## Edit or delete a note
+
+Agents can edit or delete their own plain internal notes. Admins can delete any internal note. A note in a side conversation and any reply are immutable through these routes. Editing takes sanitized `body_html` and sets `edited_at`; deleting removes the note and its attachment records, and removes stored files when no other attachment uses them. Both actions add a timeline entry that identifies the actor without including the note text.
+
+```sh
+curl -X PATCH https://api.opendesk.sh/v1/tickets/1042/messages/0192f0c5-... \
+  -H "Authorization: Bearer od_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "body_html": "<p>Corrected note.</p>" }'
+```
+
+Edits publish `message.updated`; deletion returns `204` and publishes `message.deleted`.
 
 ## Attachments
 

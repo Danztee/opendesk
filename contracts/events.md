@@ -65,6 +65,7 @@ gateway pushes it in full to those user channels and the `event.hidden` stand-in
 | `ticket.deleted`         | agents     | —                                     | `{ "ticket_id": "..." }` |
 | `message.created`        | agents (note) / public (reply on chat ticket) / agents (reply on email ticket) | `contact:<wid>:<cid>:<brand_id>` when public | `{ "ticket_id": "...", "message": Message }` |
 | `message.updated`        | agents (public on chat tickets) | `contact:<wid>:<cid>:<brand_id>` when public | `{ "ticket_id": "...", "message": Message }` (delivery status; the widget agent's action card status and visitor rating, `contracts/agent.md`) |
+| `message.deleted`        | agents | — | `{ "ticket_id": "...", "message_id": "..." }` (an internal note was deleted) |
 | `activity.created`       | agents     | —                                     | `{ "ticket_id": "...", "activity": Activity }` |
 | `thread.created` / `thread.updated` | agents | — | `{ "ticket_id": "...", "thread": Thread }` (contracts/api.md "Threads"): started; a message written or answered, closed or reopened |
 | `contact.created` / `contact.updated` / `contact.deleted` | agents | — | `{ "contact": Contact }` / `{ "contact_id" }`. `contact.updated` also when a picture is uploaded, removed or found automatically |
