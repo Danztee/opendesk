@@ -27,17 +27,21 @@ import (
 
 // Limits on what one message brings.
 const (
-	maxBodyHTML       = 1 << 20
-	maxBodyText       = 200_000
-	maxAttachments    = 20
-	maxRecipients     = 50
-	maxMessages       = 2000
-	articleExcerptLen = 200
+	maxBodyHTML               = 1 << 20
+	maxBodyText               = 200_000
+	maxAttachmentsPerMessage  = 100
+	maxMessageAttachmentBytes = hd.MaxAttachmentBytes
+	maxRecipients             = 50
+	maxMessages               = 2000
+	articleExcerptLen         = 200
 )
 
 // errStopped means the import was paused, canceled or moved on to another generation
 // while a write waited: nothing was written.
-var errStopped = errors.New("import stopped")
+var (
+	errStopped                    = errors.New("import stopped")
+	errMessageAttachmentByteLimit = errors.New("the message exceeds its total attachment limit")
+)
 
 // writer writes one run's tickets and articles. It checks the mapping against the
 // workspace once, and keeps what it looked up for the rest of the run.
@@ -226,23 +230,34 @@ func (w *writer) copyFiles(ctx context.Context, t *source.Ticket, msgs []source.
 	}
 	item := "Ticket " + t.Ref
 	for _, m := range msgs {
+		var totalBytes int64
+		byteLimitReported := false
 		for i, a := range m.Attachments {
-			if i >= maxAttachments {
-				w.problem(item, fmt.Sprintf("Only the first %d attachments of a message were copied.", maxAttachments))
+			if i >= maxAttachmentsPerMessage {
+				w.problem(item, fmt.Sprintf("Only the first %d attachments in a message were considered; later ones were left out.", maxAttachmentsPerMessage))
 				break
 			}
 			if a.Size > hd.MaxAttachmentBytes {
 				w.problem(item, fmt.Sprintf("%s is over 25 MB, so it was left out.", hd.CleanFilename(a.Name)))
 				continue
 			}
-			id, err := w.copyFile(ctx, a)
+			remainingBytes := int64(maxMessageAttachmentBytes) - totalBytes
+			id, size, err := w.copyFile(ctx, a, remainingBytes)
 			if err != nil {
 				if stopping(err) {
 					return nil, err
 				}
+				if errors.Is(err, errMessageAttachmentByteLimit) {
+					if !byteLimitReported {
+						w.problem(item, "Some attachments were left out because they would exceed the 25 MB total attachment limit per message.")
+						byteLimitReported = true
+					}
+					continue
+				}
 				w.problem(item, fmt.Sprintf("%s could not be copied: %s", hd.CleanFilename(a.Name), plain(err)))
 				continue
 			}
+			totalBytes += size
 			out[m.ID] = append(out[m.ID], copied{id: id, inline: a.Inline, url: a.URL})
 			w.x.Counts.Attachments++
 		}
@@ -250,32 +265,39 @@ func (w *writer) copyFiles(ctx context.Context, t *source.Ticket, msgs []source.
 	return out, nil
 }
 
-func (w *writer) copyFile(ctx context.Context, a source.Attachment) (uuid.UUID, error) {
+func (w *writer) copyFile(ctx context.Context, a source.Attachment, maxBytes int64) (uuid.UUID, int64, error) {
+	if maxBytes <= 0 || a.Size > maxBytes {
+		return uuid.Nil, 0, errMessageAttachmentByteLimit
+	}
+	maxRead := min(int64(hd.MaxAttachmentBytes), maxBytes)
 	var data []byte
 	if a.Data != nil {
 		data = a.Data
 	} else {
 		rc, err := w.src.Download(ctx, a)
 		if err != nil {
-			return uuid.Nil, err
+			return uuid.Nil, 0, err
 		}
 		defer rc.Close()
-		if data, err = io.ReadAll(io.LimitReader(rc, hd.MaxAttachmentBytes+1)); err != nil {
-			return uuid.Nil, err
+		if data, err = io.ReadAll(io.LimitReader(rc, maxRead+1)); err != nil {
+			return uuid.Nil, 0, err
 		}
 	}
 	if len(data) > hd.MaxAttachmentBytes {
-		return uuid.Nil, errors.New("it is over 25 MB")
+		return uuid.Nil, 0, errors.New("it is over 25 MB")
+	}
+	if int64(len(data)) > maxBytes {
+		return uuid.Nil, 0, errMessageAttachmentByteLimit
 	}
 	if len(data) == 0 {
-		return uuid.Nil, errors.New("the file is empty")
+		return uuid.Nil, 0, errors.New("the file is empty")
 	}
 	att, err := hd.SaveUpload(ctx, w.s.d.Storage, w.s.d.DB.Pool, hd.Upload{WorkspaceID: w.x.WorkspaceID, Filename: a.Name,
 		Size: int64(len(data)), Body: bytes.NewReader(data)})
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, 0, err
 	}
-	return att.ID, nil
+	return att.ID, int64(len(data)), nil
 }
 
 // stopping reports errors that stop the run rather than one item: the source's rate

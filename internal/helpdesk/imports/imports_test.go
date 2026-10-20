@@ -22,6 +22,7 @@ import (
 	"github.com/useopendesk/opendesk/internal/auth"
 	"github.com/useopendesk/opendesk/internal/deps"
 	"github.com/useopendesk/opendesk/internal/domain"
+	"github.com/useopendesk/opendesk/internal/helpdesk/hd"
 	"github.com/useopendesk/opendesk/internal/helpdesk/hdtest"
 	"github.com/useopendesk/opendesk/internal/helpdesk/imports/source"
 	"github.com/useopendesk/opendesk/internal/helpdesk/tickets"
@@ -567,6 +568,76 @@ func TestRunImport(t *testing.T) {
 	}
 	if n := e.count(t, `SELECT count(*) FROM kb_articles WHERE workspace_id = $1`, e.ws.ID); n != 2 {
 		t.Errorf("articles after undoing the second import %d", n)
+	}
+}
+
+func TestImportAttachmentCountLimit(t *testing.T) {
+	e := newEnv(t)
+	attachments := make([]source.Attachment, 0, 101)
+	for i := range 101 {
+		name := "file-" + strconv.Itoa(i+1) + ".txt"
+		a := source.Attachment{ID: name, Name: name, Size: 1, Data: []byte("x")}
+		attachments = append(attachments, a)
+	}
+	e.f.tickets[0].Messages[1].Attachments = attachments
+
+	done := e.drive(t, e.start(t, e.zendeskBody()).ID)
+	if done.Status != StatusCompleted {
+		t.Fatalf("import status %s, problems %+v", done.Status, done.Problems)
+	}
+	if done.Counts.Attachments != 100 {
+		t.Fatalf("copied %d attachments, want 100 (problems %+v)", done.Counts.Attachments, done.Problems)
+	}
+
+	ticketID := e.ticketByRef(t, "101")
+	var messageID uuid.UUID
+	e.Scalar(`SELECT id FROM messages WHERE ticket_id = $1 AND created_at = $2`, &messageID, ticketID, base.Add(time.Hour))
+	count := e.count(t, `SELECT count(*) FROM attachments WHERE workspace_id = $1 AND message_id = $2`, e.ws.ID, messageID)
+	if count != 100 {
+		t.Fatalf("message has %d attachments, want 100", count)
+	}
+
+	countLimitReported := false
+	for _, p := range done.Problems {
+		countLimitReported = countLimitReported || strings.Contains(p.Message, "100 attachments")
+	}
+	if !countLimitReported {
+		t.Fatalf("missing attachment count problem: %+v", done.Problems)
+	}
+}
+
+func TestImportAttachmentTotalSizeLimit(t *testing.T) {
+	e := newEnv(t)
+	largeURL := "https://files.test/large"
+	e.f.tickets[0].Messages[1].Attachments = []source.Attachment{
+		{ID: "small", Name: "small.txt", Size: 1, Data: []byte("x")},
+		{ID: "large", Name: "large.txt", URL: largeURL},
+		{ID: "later", Name: "later.txt", Size: 1, Data: []byte("y")},
+	}
+	e.f.files[largeURL] = bytes.Repeat([]byte("x"), hd.MaxAttachmentBytes)
+
+	done := e.drive(t, e.start(t, e.zendeskBody()).ID)
+	if done.Status != StatusCompleted {
+		t.Fatalf("import status %s, problems %+v", done.Status, done.Problems)
+	}
+	if done.Counts.Attachments != 2 {
+		t.Fatalf("copied %d attachments, want 2 (problems %+v)", done.Counts.Attachments, done.Problems)
+	}
+	ticketID := e.ticketByRef(t, "101")
+	var messageID uuid.UUID
+	e.Scalar(`SELECT id FROM messages WHERE ticket_id = $1 AND created_at = $2`, &messageID, ticketID, base.Add(time.Hour))
+	count := e.count(t, `SELECT count(*) FROM attachments WHERE workspace_id = $1 AND message_id = $2`, e.ws.ID, messageID)
+	if count != 2 {
+		t.Fatalf("message has %d attachments, want 2", count)
+	}
+	var total int64
+	e.Scalar(`SELECT COALESCE(sum(size_bytes), 0) FROM attachments WHERE workspace_id = $1 AND message_id = $2`,
+		&total, e.ws.ID, messageID)
+	if total > hd.MaxAttachmentBytes {
+		t.Fatalf("message has %d attachment bytes, over the %d-byte limit", total, hd.MaxAttachmentBytes)
+	}
+	if !slices.ContainsFunc(done.Problems, func(p ImportProblem) bool { return strings.Contains(p.Message, "25 MB total") }) {
+		t.Fatalf("missing attachment size problem: %+v", done.Problems)
 	}
 }
 
