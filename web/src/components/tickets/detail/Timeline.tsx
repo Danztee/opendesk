@@ -75,6 +75,16 @@ function teamLabel(v: unknown, teams: Team[] | undefined): string | null {
   return null;
 }
 
+function contactLabel(v: unknown, t: TFunction<"inbox">): string {
+  if (v && typeof v === "object") {
+    const contact = v as { name?: unknown; email?: unknown };
+    if (typeof contact.name === "string" && contact.name) return contact.name;
+    if (typeof contact.email === "string" && contact.email) return contact.email;
+  }
+  if (typeof v === "string" && v) return /^[0-9a-f-]{36}$/i.test(v) ? t("activity.unknownContact") : v;
+  return t("activity.noContact");
+}
+
 /** An address in activity data: a mailbox id, an email or an object with one. */
 function addressOf(v: unknown, mailboxes: Mailbox[] | undefined): string | null {
   if (!v) return null;
@@ -154,6 +164,11 @@ function describe(a: Activity, t: TFunction<"inbox">, { teams, members, tags, fi
         ),
       };
     }
+    case "contact_changed":
+      return {
+        icon: <Users />,
+        text: line("activity.contactChanged", { from: contactLabel(d.from, t), to: contactLabel(d.to, t) }),
+      };
     case "tagged":
     case "untagged": {
       const raw = d.tag as string | { name?: string; color?: string | null } | undefined;

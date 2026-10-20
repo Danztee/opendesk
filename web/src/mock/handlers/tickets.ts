@@ -57,6 +57,7 @@ function ticket(ctx: Ctx): Ticket {
 
 /** Team, brand and reply address checks for a patch (contracts/teams.md). */
 function checkPatch(ws: WsData, t: Ticket, p: TicketPatch) {
+  if (p.contact_id && !ws.contacts.some((x) => x.id === p.contact_id)) throw invalid("Unknown contact");
   if (p.team_id && !ws.teams.some((x) => x.id === p.team_id)) throw invalid("Unknown team");
   if (p.brand_id !== undefined && !ws.brands.some((b) => b.id === p.brand_id)) throw invalid("Unknown brand");
   if (p.mailbox_id) {
@@ -78,6 +79,10 @@ function hideIfPrivate(ws: WsData, t: Ticket, fromTeam: string | null) {
 
 function readPatch(body: Record<string, unknown>): TicketPatch {
   const p: TicketPatch = {};
+  if ("contact_id" in body) {
+    if (typeof body.contact_id !== "string" || !body.contact_id.trim()) throw invalid("contact_id must be a contact id");
+    p.contact_id = body.contact_id;
+  }
   if (typeof body.subject === "string") {
     if (!body.subject.trim()) throw invalid("Subject can't be empty");
     p.subject = body.subject.trim().slice(0, 250);

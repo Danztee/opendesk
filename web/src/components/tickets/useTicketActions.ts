@@ -4,7 +4,7 @@
 
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/endpoints";
-import type { Mailbox, Member, SuggestionField, Tag, TagGroup, TagRef, Team, Ticket, TicketPatch } from "@/lib/api/types";
+import type { Contact, Mailbox, Member, SuggestionField, Tag, TagGroup, TagRef, Team, Ticket, TicketPatch } from "@/lib/api/types";
 import { withoutSuggestion } from "@/lib/decisions";
 import { qk } from "@/lib/queries";
 import { cachedTicket, forgetTicket, patchTicketEverywhere, removeTicketEverywhere, teamsOf } from "@/lib/ticketCache";
@@ -42,6 +42,12 @@ export function applyPatch(qc: QueryClient, t: Ticket, p: TicketPatch): Ticket {
   if (p.severity !== undefined) next.severity = p.severity;
   if (p.spam !== undefined) next.spam = p.spam;
   if (p.snoozed_until !== undefined) next.snoozed_until = p.snoozed_until;
+  if (p.contact_id !== undefined && p.contact_id !== t.contact?.id) {
+    const contact = qc.getQueryData<Contact>(qk.contact(p.contact_id));
+    next.contact = contact
+      ? { id: contact.id, name: contact.name, email: contact.email, avatar_url: contact.avatar_url }
+      : { id: p.contact_id, name: "", email: null, avatar_url: null };
+  }
   if (p.team_id !== undefined && p.team_id !== t.team_id) {
     // The reply address follows the team when the old one was the old team's (contracts/teams.md).
     const sw = replyAddressAfterMove(t, p.team_id, qc.getQueryData<Mailbox[]>(qk.mailboxes) ?? []);

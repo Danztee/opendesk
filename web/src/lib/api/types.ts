@@ -1196,6 +1196,8 @@ export type TicketPatch = {
   priority?: Priority;
   /** null clears. */
   severity?: Severity | null;
+  /** Changes the contact who receives future replies. */
+  contact_id?: string;
   assignee_id?: string | null;
   team_id?: string | null;
   /** The address replies go out from (an address of the ticket's brand). */

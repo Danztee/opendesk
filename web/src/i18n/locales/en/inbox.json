@@ -299,6 +299,12 @@
     "teamCleared_other": "Removed the team from {{count}} tickets"
   },
   "props": {
+    "contact": "Contact",
+    "changeContact": "Change contact",
+    "searchContacts": "Search contacts",
+    "searchingContacts": "Searching contacts",
+    "noContactsFound": "No contacts found",
+    "noContact": "No contact is linked to this ticket.",
     "status": "Status",
     "priority": "Priority",
     "severity": "Severity",
@@ -374,6 +380,9 @@
     "assigned": "<b>{{who}}</b> assigned this to <b>{{to}}</b>",
     "unassigned": "<b>{{who}}</b> unassigned this ticket",
     "team": "<b>{{who}}</b> moved this to <b>{{team}}</b>",
+    "contactChanged": "<b>{{who}}</b> changed the contact from <b>{{from}}</b> to <b>{{to}}</b>",
+    "noContact": "no contact",
+    "unknownContact": "a contact",
     "teamRemoved": "<b>{{who}}</b> removed the team",
     "tagged": "<b>{{who}}</b> added",
     "untagged": "<b>{{who}}</b> removed",
