@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -407,6 +408,71 @@ func TestVisitorFileTypes(t *testing.T) {
 	m = e.Do("GET", "/v1/widget/config?key="+ws.WidgetKey, hdtest.Auth{}, nil).Want(t, 200).Map(t)
 	if ext, _ := m["attachment_extensions"].([]any); len(ext) != 0 {
 		t.Fatal(m["attachment_extensions"])
+	}
+}
+
+func TestVisitorVoiceMessages(t *testing.T) {
+	e, ws := setup(t)
+	s := start(t, e, map[string]any{"key": ws.WidgetKey})
+	va := hdtest.Auth{Visitor: s.VisitorToken}
+	webm := []byte("\x1a\x45\xdf\xa3\x9f\x42\x86\x81\x01webm\x18\x53\x80\x67\x86\x86A_OPUS\x63\xa2")
+	ogg := []byte("OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x13OpusHead\x01")
+	video := []byte("\x1a\x45\xdf\xa3\x9f\x42\x86\x81\x01webm\x86\x85V_VP8\x86\x86A_OPUS")
+
+	// Off by default, a minute long.
+	m := e.Do("GET", "/v1/widget/config?key="+ws.WidgetKey, hdtest.Auth{}, nil).Want(t, 200).Map(t)
+	if m["voice_messages"] != false || m["voice_max_seconds"] != float64(60) {
+		t.Fatal(m)
+	}
+	// Recordings are taken only as files of the widget's types: images only refuses them.
+	e.SetWidgetSettings(ws, uuid.Nil, map[string]any{"attachment_types": []string{"png"}})
+	e.Upload("/v1/widget/attachments", va, "voice.webm", webm).Want(t, 422)
+
+	e.SetWidgetSettings(ws, uuid.Nil, map[string]any{"voice_messages": true, "voice_max_seconds": 120})
+	m = e.Do("GET", "/v1/widget/config?key="+ws.WidgetKey, hdtest.Auth{}, nil).Want(t, 200).Map(t)
+	if m["voice_messages"] != true || m["voice_max_seconds"] != float64(120) {
+		t.Fatal(m)
+	}
+	e.Upload("/v1/widget/attachments", va, "voice.webm", webm).Want(t, 201)
+	e.Upload("/v1/widget/attachments", va, "voice.ogg", ogg).Want(t, 201)
+	e.Upload("/v1/widget/attachments", va, "clip.webm", video).Want(t, 422) // a picture is not a voice message
+	e.Upload("/v1/widget/attachments", va, "voice.webm", []byte("#!/bin/sh\nid")).Want(t, 422)
+	e.Upload("/v1/widget/attachments", va, "invoice.pdf", []byte("%PDF-1.7\n")).Want(t, 422)
+
+	// A new session, under the upload rate limit.
+	va = hdtest.Auth{Visitor: start(t, e, map[string]any{"key": ws.WidgetKey}).VisitorToken}
+
+	// No longer than voice_max_seconds allows.
+	e.SetWidgetSettings(ws, uuid.Nil, map[string]any{"voice_max_seconds": 5})
+	long := append(slices.Clone(webm), make([]byte, hd.VoiceMaxBytes(5))...)
+	if r := e.Upload("/v1/widget/attachments", va, "voice.webm", long).Want(t, 413).Map(t); r["code"] != "voice_too_long" {
+		t.Fatal(r)
+	}
+
+	// With files off, a voice message is still sent.
+	e.SetWidgetSettings(ws, uuid.Nil, map[string]any{"attachments": false})
+	var voice domain.Attachment
+	e.Upload("/v1/widget/attachments", va, "voice.webm", webm).Want(t, 201).JSON(t, &voice)
+	e.Upload("/v1/widget/attachments", va, "shot.png", pngBytes()).Want(t, 422)
+	var created struct {
+		Message domain.Message `json:"message"`
+	}
+	e.Do("POST", "/v1/widget/conversations", va, map[string]any{"attachment_ids": []string{voice.ID.String()}}).Want(t, 201).JSON(t, &created)
+	if len(created.Message.Attachments) != 1 || created.Message.Attachments[0].ContentType != "audio/webm" {
+		t.Fatal(created.Message)
+	}
+
+	// Files on for any type, with voice on, still take any file.
+	e.SetWidgetSettings(ws, uuid.Nil, map[string]any{"attachments": true, "attachment_types": []string{}})
+	e.Upload("/v1/widget/attachments", va, "invoice.pdf", []byte("%PDF-1.7\n")).Want(t, 201)
+	e.Upload("/v1/widget/attachments", va, "clip.webm", video).Want(t, 201)
+
+	// Both off: nothing.
+	e.SetWidgetSettings(ws, uuid.Nil, map[string]any{"attachments": false, "voice_messages": false})
+	e.Upload("/v1/widget/attachments", va, "voice.webm", webm).Want(t, 403)
+
+	for _, n := range []int{4, 301} {
+		e.Do("PATCH", "/v1/widget/settings", ws.Admin.As(ws), map[string]any{"voice_max_seconds": n}).Want(t, 422)
 	}
 }
 

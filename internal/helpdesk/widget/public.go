@@ -115,6 +115,34 @@ var errWidgetDisabled = httpx.E(http.StatusForbidden, "widget_disabled", "The ch
 
 var errAttachmentsOff = httpx.E(http.StatusForbidden, "attachments_off", "This chat does not take files.")
 
+var errVoiceTooLong = httpx.E(http.StatusRequestEntityTooLarge, "voice_too_long", "This voice message is longer than this chat takes.")
+
+// takesUploads reports whether visitors may send the widget anything: files or voice
+// messages.
+func takesUploads(w hd.WidgetSettings) bool { return w.Attachments || w.VoiceMessages }
+
+// visitorAccept decides whether a visitor's file is taken through a widget: as a file of
+// its attachment types (any but a program while it has none), or, with voice messages on,
+// as a recording of sound alone no larger than voice_max_seconds allows. Nil when the
+// widget takes any file, so nothing is checked again.
+func visitorAccept(w hd.WidgetSettings) hd.Accept {
+	if w.Attachments && len(w.AttachmentTypes) == 0 {
+		return nil
+	}
+	return func(head []byte, filename string, size int64) error {
+		if w.Attachments && hd.FileTypeAllowed(head, filename, w.AttachmentTypes) {
+			return nil
+		}
+		if w.VoiceMessages && hd.IsVoice(head, filename) {
+			if size > hd.VoiceMaxBytes(w.VoiceMaxSeconds) {
+				return errVoiceTooLong
+			}
+			return nil
+		}
+		return hd.ErrFileTypeNotAllowed
+	}
+}
+
 type configTopic struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
@@ -143,6 +171,8 @@ type widgetConfig struct {
 		Sound           bool          `json:"sound"`
 		Attachments     bool          `json:"attachments" doc:"Visitors may send files"`
 		AttachmentExts  []string      `json:"attachment_extensions" nullable:"true" doc:"Extensions of the file types visitors may send; null when any file but a program or a script; [] while attachments is off"`
+		VoiceMessages   bool          `json:"voice_messages" doc:"Visitors may record voice messages"`
+		VoiceMaxSeconds int           `json:"voice_max_seconds" doc:"The longest voice message, in seconds"`
 		Team            []teamFace    `json:"team" doc:"Up to 3 members of the widget's team (else of the workspace), available first; first names only"`
 		AIAnswers       bool          `json:"ai_answers" doc:"The AI agent handles new conversations"`
 		Bot             struct {
@@ -291,6 +321,7 @@ func (h *handler) registerPublic(api huma.API) {
 			} else if ws.Attachments {
 				b.AttachmentExts = hd.FileTypeExtensions(ws.AttachmentTypes)
 			}
+			b.VoiceMessages, b.VoiceMaxSeconds = ws.VoiceMessages, ws.VoiceMaxSeconds
 			if b.Title == "" {
 				b.Title = g.BrandName
 			}

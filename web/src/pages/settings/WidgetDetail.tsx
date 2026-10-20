@@ -103,6 +103,8 @@ function withDefaults(s: WS): WS {
     email_follow_up: s.email_follow_up ?? true,
     attachments: s.attachments ?? true,
     attachment_types: s.attachment_types ?? [],
+    voice_messages: s.voice_messages ?? false,
+    voice_max_seconds: s.voice_max_seconds ?? 60,
   };
 }
 
@@ -559,6 +561,23 @@ function WidgetEditor({ widget, brand, back }: { widget: Widget; brand: Brand | 
                     </span>
                   )}
                 </div>
+              </Row>
+            )}
+            <Row label={t("widget.voice")} description={t("widget.voiceHint")}>
+              <Switch checked={s.voice_messages} onCheckedChange={(voice_messages) => set({ voice_messages })} aria-label={t("widget.voice")} />
+            </Row>
+            {s.voice_messages && (
+              <Row label={t("widget.voiceLength")} description={t("widget.voiceLengthHint")}>
+                <Stepper
+                  value={s.voice_max_seconds}
+                  onChange={(voice_max_seconds) => set({ voice_max_seconds })}
+                  min={5}
+                  max={300}
+                  step={5}
+                  suffix={t("widget.secondsSuffix")}
+                  aria-label={t("widget.voiceLength")}
+                  className="w-[124px]"
+                />
               </Row>
             )}
             <Row label={t("widget.sound")} description={t("widget.soundHint")}>
