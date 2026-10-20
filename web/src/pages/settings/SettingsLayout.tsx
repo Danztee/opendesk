@@ -24,6 +24,7 @@ import {
   Layers,
   ListChecks,
   MessageCircle,
+  MessageSquareShare,
   MessageSquareText,
   Palette,
   Plug,
@@ -54,6 +55,7 @@ type NavPath =
   | "/settings/members"
   | "/settings/teams"
   | "/settings/mailboxes"
+  | "/settings/support-channels"
   | "/settings/mail-accounts"
   | "/settings/brands"
   | "/settings/email-design"
@@ -124,6 +126,7 @@ const groups: { title: string; items: { to: NavPath; label: string; icon: ReactN
     title: "Channels",
     items: [
       { to: "/settings/mailboxes", label: "Mailboxes", icon: <Inbox /> },
+      { to: "/settings/support-channels", label: "Support channels", icon: <MessageSquareShare /> },
       { to: "/settings/mail-accounts", label: "Mail accounts", icon: <AtSign /> },
       { to: "/settings/routing", label: "Routing", icon: <Route /> },
       { to: "/settings/brands", label: "Brands and widgets", icon: <MessageCircle /> },

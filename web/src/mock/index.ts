@@ -24,6 +24,7 @@ import { registerLabels } from "./handlers/labels";
 import { applyMockImap, syncReceiving } from "./handlers/mailhost";
 import { registerMcp } from "./handlers/mcp";
 import { registerNotificationPrefs } from "./handlers/notificationPrefs";
+import { registerSupportChannels } from "./handlers/supportChannels";
 import { registerTemplates } from "./handlers/templates";
 import { registerResources } from "./handlers/resources";
 import { registerTickets } from "./handlers/tickets";
@@ -81,6 +82,7 @@ export function installMock(): void {
   registerAiClients();
   registerBots();
   registerNotificationPrefs();
+  registerSupportChannels();
   registerTemplates();
   registerCollab();
 
