@@ -448,6 +448,7 @@ export type Message = {
   /** The third-party thread a note belongs to (contracts/api.md "Threads"), else null. */
   thread_id?: string | null;
   created_at: string;
+  edited_at: string | null;
 };
 /** A third-party thread: an email conversation on a ticket with someone outside the team (contracts/api.md "Threads"). */
 export type Thread = {
@@ -484,6 +485,8 @@ export type ActivityType =
   | "csat_received"
   /** data: {key, name, from, to} with FieldValue | null values. */
   | "field_changed"
+  /** data: {from, to}, each {id, name} (name, else email) or null. */
+  | "contact_changed"
   | (string & {});
 export type Activity = {
   id: string;
@@ -1216,6 +1219,8 @@ export type TicketPatch = {
   priority?: Priority;
   /** null clears. */
   severity?: Severity | null;
+  /** Changes the contact who receives future replies. */
+  contact_id?: string;
   assignee_id?: string | null;
   team_id?: string | null;
   /** The address replies go out from (an address of the ticket's brand). */
