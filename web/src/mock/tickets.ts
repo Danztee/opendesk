@@ -338,13 +338,11 @@ export function applyPatch(ws: WsData, t: Ticket, patch: TicketPatch, actor: Use
     act("severity_changed", { from, to: t.severity });
   }
   if (patch.contact_id !== undefined && patch.contact_id !== t.contact?.id) {
-    const contact = ws.contacts.find((c) => c.id === patch.contact_id);
-    if (contact) {
-      const from = t.contact;
-      t.contact = contactRef(contact);
-      changes.push("contact_id");
-      act("contact_changed", { from, to: t.contact });
-    }
+    const contact = ws.contacts.find((c) => c.id === patch.contact_id)!;
+    const from = t.contact;
+    t.contact = contactRef(contact);
+    changes.push("contact_id");
+    act("contact_changed", { from, to: t.contact });
   }
   if (patch.assignee_id !== undefined && (patch.assignee_id ?? null) !== (t.assignee?.id ?? null)) {
     const from = t.assignee;
