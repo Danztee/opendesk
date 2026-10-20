@@ -61,6 +61,10 @@ export type WidgetConfig = {
   suggestions?: string[];
   /** A soft sound for a new reply while the page is hidden. */
   sound?: boolean;
+  /** Visitors may send files; older servers omit it: true. */
+  attachments?: boolean;
+  /** Extensions of the types visitors may send ([] while files are off); null when an older server sent none: any type. */
+  attachment_extensions?: string[] | null;
   /** Up to 3 team members (first names); [] when show_team is off. */
   team?: TeamMember[];
   /** The AI agent handles new conversations (contracts/agent.md). */

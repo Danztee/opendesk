@@ -76,14 +76,18 @@ func (h *handler) registerAttachments(api huma.API, r chi.Router) {
 		MaxBodyBytes: maxUploadBody, Middlewares: huma.Middlewares{limitBody(api)}},
 		func(ctx context.Context, in *attachmentUploadInput) (*attachmentUploadOutput, error) {
 			defer removeForm(in.RawBody.Form)
-			p, err := h.visitor(ctx, in.Origin)
+			p, g, err := h.visitorWidget(ctx, in.Origin)
 			if err != nil {
 				return nil, httpx.Wrap(err)
+			}
+			if !g.Settings.Attachments {
+				return nil, errAttachmentsOff
 			}
 			if err := h.allowWrite(p, "upload", uploadLimit); err != nil {
 				return nil, err
 			}
-			a, err := h.save(ctx, in, hd.Upload{WorkspaceID: p.WorkspaceID, UploadedByContact: &p.ContactID})
+			a, err := h.save(ctx, in, hd.Upload{WorkspaceID: p.WorkspaceID, UploadedByContact: &p.ContactID,
+				Types: g.Settings.AttachmentTypes})
 			if err != nil {
 				return nil, httpx.Wrap(err)
 			}

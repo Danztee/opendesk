@@ -113,6 +113,8 @@ func loadVisitorWidget(ctx context.Context, q db.Querier, p *auth.Principal) (wi
 
 var errWidgetDisabled = httpx.E(http.StatusForbidden, "widget_disabled", "The chat widget is turned off.")
 
+var errAttachmentsOff = httpx.E(http.StatusForbidden, "attachments_off", "This chat does not take files.")
+
 type configTopic struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
@@ -139,6 +141,8 @@ type widgetConfig struct {
 		Subtitle        string        `json:"subtitle"`
 		Suggestions     []string      `json:"suggestions"`
 		Sound           bool          `json:"sound"`
+		Attachments     bool          `json:"attachments" doc:"Visitors may send files"`
+		AttachmentExts  []string      `json:"attachment_extensions" nullable:"true" doc:"Extensions of the file types visitors may send; null when any file but a program or a script; [] while attachments is off"`
 		Team            []teamFace    `json:"team" doc:"Up to 3 members of the widget's team (else of the workspace), available first; first names only"`
 		AIAnswers       bool          `json:"ai_answers" doc:"The AI agent handles new conversations"`
 		Bot             struct {
@@ -280,6 +284,13 @@ func (h *handler) registerPublic(api huma.API) {
 			b.Theme, b.Position, b.OffsetX, b.OffsetY = ws.Theme, ws.Position, ws.OffsetX, ws.OffsetY
 			b.Launcher, b.LauncherLabel, b.Radius = ws.Launcher, ws.LauncherLabel, ws.Radius
 			b.Title, b.Subtitle, b.Suggestions, b.Sound = ws.Title, ws.Subtitle, ws.Suggestions, ws.Sound
+			b.Attachments = ws.Attachments
+			b.AttachmentExts = []string{}
+			if ws.Attachments && len(ws.AttachmentTypes) == 0 {
+				b.AttachmentExts = nil
+			} else if ws.Attachments {
+				b.AttachmentExts = hd.FileTypeExtensions(ws.AttachmentTypes)
+			}
 			if b.Title == "" {
 				b.Title = g.BrandName
 			}

@@ -156,6 +156,8 @@ export function defaultWidget(): WidgetSettings {
     topics: [],
     offline_message: "",
     email_follow_up: true,
+    attachments: true,
+    attachment_types: [],
   };
 }
 

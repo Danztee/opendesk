@@ -51,7 +51,7 @@ func TestConfig(t *testing.T) {
 	e, ws := setup(t)
 	e.Do("GET", "/v1/widget/config?key=nope", hdtest.Auth{}, nil).Want(t, 404)
 	m := e.Do("GET", "/v1/widget/config?key="+ws.WidgetKey, hdtest.Auth{}, nil).Want(t, 200).Map(t)
-	if m["workspace_name"] != "Acme "+ws.Slug || m["help_center_url"] != "" || m["require_email"] != false {
+	if m["workspace_name"] != "Acme "+ws.Slug || m["help_center_url"] != "" || m["require_email"] != false || m["attachments"] != true {
 		t.Fatal(m)
 	}
 	e.SetSettings(ws, map[string]any{"brand_color": "#111111"})
@@ -298,6 +298,9 @@ func TestVisitorAttachments(t *testing.T) {
 	e.Do("POST", "/v1/widget/conversations", va, map[string]any{"body": "x", "attachment_ids": []string{theirs.ID.String()}}).Want(t, 422)
 	e.Do("POST", "/v1/widget/conversations", va, map[string]any{"body": "x", "attachment_ids": []string{agents.ID.String()}}).Want(t, 422)
 	var created struct {
+		Conversation struct {
+			ID uuid.UUID `json:"id"`
+		} `json:"conversation"`
 		Message domain.Message `json:"message"`
 	}
 	e.Do("POST", "/v1/widget/conversations", va, map[string]any{"body": "see file", "attachment_ids": []string{mine.ID.String()}}).
@@ -312,6 +315,99 @@ func TestVisitorAttachments(t *testing.T) {
 	e.Do("GET", "/v1/attachments/"+mine.ID.String(), va, nil).Want(t, 200)
 	e.Do("GET", "/v1/attachments/"+mine.ID.String(), oa, nil).Want(t, 404)
 	e.Do("GET", "/v1/attachments/"+agents.ID.String(), va, nil).Want(t, 404)
+
+	// With attachments off the widget takes no files, not even one uploaded before.
+	var early domain.Attachment
+	e.Upload("/v1/widget/attachments", va, "early.txt", []byte("early")).Want(t, 201).JSON(t, &early)
+	e.SetWidgetSettings(ws, uuid.Nil, map[string]any{"attachments": false})
+	if m := e.Do("GET", "/v1/widget/config?key="+ws.WidgetKey, hdtest.Auth{}, nil).Want(t, 200).Map(t); m["attachments"] != false {
+		t.Fatal(m)
+	}
+	e.Upload("/v1/widget/attachments", va, "late.txt", []byte("late")).Want(t, 403)
+	e.Do("POST", "/v1/widget/conversations", va, map[string]any{"body": "x", "attachment_ids": []string{early.ID.String()}}).Want(t, 403)
+	cid := created.Conversation.ID.String()
+	e.Do("POST", "/v1/widget/conversations/"+cid+"/messages", va, map[string]any{"body": "x", "attachment_ids": []string{early.ID.String()}}).Want(t, 403)
+	e.Do("POST", "/v1/widget/conversations/"+cid+"/messages", va, map[string]any{"body": "text still works"}).Want(t, 201)
+	// The agent's own uploads are not the widget's.
+	e.Upload("/v1/attachments", ws.Agent.As(ws), "agent2.txt", []byte("agent file")).Want(t, 201)
+}
+
+func TestVisitorFileOnly(t *testing.T) {
+	e, ws := setup(t)
+	s := start(t, e, map[string]any{"key": ws.WidgetKey})
+	va := hdtest.Auth{Visitor: s.VisitorToken}
+
+	// Neither text nor a file: nothing to send.
+	e.Do("POST", "/v1/widget/conversations", va, map[string]any{"body": "  "}).Want(t, 422)
+
+	var first, second domain.Attachment
+	e.Upload("/v1/widget/attachments", va, "Peşə kitabı.pdf", []byte("%PDF-1.7\n")).Want(t, 201).JSON(t, &first)
+	e.Upload("/v1/widget/attachments", va, "shot.png", pngBytes()).Want(t, 201).JSON(t, &second)
+	var created struct {
+		Conversation struct {
+			ID      uuid.UUID `json:"id"`
+			Subject string    `json:"subject"`
+		} `json:"conversation"`
+		Message domain.Message `json:"message"`
+	}
+	e.Do("POST", "/v1/widget/conversations", va, map[string]any{"body": "", "attachment_ids": []string{first.ID.String()}}).
+		Want(t, 201).JSON(t, &created)
+	if created.Conversation.Subject != "Peşə kitabı.pdf" || len(created.Message.Attachments) != 1 || created.Message.BodyText != "" {
+		t.Fatalf("%+v %+v", created.Conversation, created.Message)
+	}
+	cid := created.Conversation.ID.String()
+	var m domain.Message
+	e.Do("POST", "/v1/widget/conversations/"+cid+"/messages", va, map[string]any{"attachment_ids": []string{second.ID.String()}}).
+		Want(t, 201).JSON(t, &m)
+	if len(m.Attachments) != 1 || m.Attachments[0].ID != second.ID {
+		t.Fatal(m.Attachments)
+	}
+	e.Do("POST", "/v1/widget/conversations/"+cid+"/messages", va, map[string]any{"body": ""}).Want(t, 422)
+}
+
+func TestVisitorFileTypes(t *testing.T) {
+	e, ws := setup(t)
+	s := start(t, e, map[string]any{"key": ws.WidgetKey})
+	va := hdtest.Auth{Visitor: s.VisitorToken}
+
+	// By default any file but a program or a script.
+	m := e.Do("GET", "/v1/widget/config?key="+ws.WidgetKey, hdtest.Auth{}, nil).Want(t, 200).Map(t)
+	if ext, ok := m["attachment_extensions"]; !ok || ext != nil {
+		t.Fatal(m["attachment_extensions"])
+	}
+	var early domain.Attachment
+	e.Upload("/v1/widget/attachments", va, "invoice.pdf", []byte("%PDF-1.7\n")).Want(t, 201).JSON(t, &early)
+	e.Upload("/v1/widget/attachments", va, "notes.txt", []byte("hello")).Want(t, 201)
+	e.Upload("/v1/widget/attachments", va, "export.json", []byte(`{"a":1}`)).Want(t, 201)
+	e.Upload("/v1/widget/attachments", va, "tool.exe", []byte("MZ\x90\x00")).Want(t, 422)
+
+	// Images only.
+	e.SetWidgetSettings(ws, uuid.Nil, map[string]any{"attachment_types": []string{"png", "jpg"}})
+	m = e.Do("GET", "/v1/widget/config?key="+ws.WidgetKey, hdtest.Auth{}, nil).Want(t, 200).Map(t)
+	if ext, _ := m["attachment_extensions"].([]any); len(ext) != 3 || ext[0] != ".png" || ext[1] != ".jpg" || ext[2] != ".jpeg" {
+		t.Fatal(m["attachment_extensions"])
+	}
+	e.Upload("/v1/widget/attachments", va, "shot.png", pngBytes()).Want(t, 201)
+	r := e.Upload("/v1/widget/attachments", va, "invoice.pdf", []byte("%PDF-1.7\n")).Want(t, 422).Map(t)
+	if r["code"] != "file_type_not_allowed" {
+		t.Fatal(r)
+	}
+	e.Upload("/v1/widget/attachments", va, "shell.png", []byte("#!/bin/sh\nid")).Want(t, 422)
+	e.Upload("/v1/widget/attachments", va, "page.png", []byte("<html><script>alert(1)</script></html>")).Want(t, 422)
+	// A file uploaded before the types narrowed is held to them when it is sent.
+	r = e.Do("POST", "/v1/widget/conversations", va, map[string]any{"body": "x", "attachment_ids": []string{early.ID.String()}}).Want(t, 422).Map(t)
+	if r["code"] != "file_type_not_allowed" {
+		t.Fatal(r)
+	}
+	// Agents are not limited by the widget's types.
+	e.Upload("/v1/attachments", ws.Agent.As(ws), "invoice.pdf", []byte("%PDF-1.7\n")).Want(t, 201)
+
+	// Files off: no extensions.
+	e.SetWidgetSettings(ws, uuid.Nil, map[string]any{"attachments": false})
+	m = e.Do("GET", "/v1/widget/config?key="+ws.WidgetKey, hdtest.Auth{}, nil).Want(t, 200).Map(t)
+	if ext, _ := m["attachment_extensions"].([]any); len(ext) != 0 {
+		t.Fatal(m["attachment_extensions"])
+	}
 }
 
 func TestAgentAttachments(t *testing.T) {

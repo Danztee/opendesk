@@ -1152,6 +1152,10 @@ export type WidgetSettings = {
   offline_message: string;
   /** Email agent replies to a visitor who left an email and is not connected. */
   email_follow_up: boolean;
+  /** Visitors may send files. */
+  attachments: boolean;
+  /** Ids of the file type catalog (components/widget/fileTypes.ts) visitors may send; [] takes any file but programs and scripts. */
+  attachment_types: string[];
 };
 /** GET /v1/widget/config: what the widget renders. */
 export type WidgetConfig = {
@@ -1174,6 +1178,10 @@ export type WidgetConfig = {
   subtitle: string;
   suggestions: string[];
   sound: boolean;
+  /** Visitors may send files; older servers omit it. */
+  attachments?: boolean;
+  /** Extensions of the types visitors may send; null for any file but programs and scripts; [] while attachments is off. */
+  attachment_extensions?: string[] | null;
   team: { name: string; avatar_url: string | null }[];
   ai_answers: boolean;
   /** The widget's bot, else the default bot (contracts/bots.md). */

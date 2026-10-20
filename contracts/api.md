@@ -655,14 +655,14 @@ checklist is complete (`GET /v1/ai/agent/setup`, `contracts/agent.md` "Setup"). 
 | GET | `/v1/widget/config?key=<widget_key>` | `WidgetConfig` below; any widget's key (contracts/teams.md) |
 | POST | `/v1/widget/session` | `{key, visitor_token?, email?, name?, user_id?, user_hash?, avatar_url?}` → `{visitor_token, contact: ContactRef, ws_token, gateway_url}`; `user_hash` = hex HMAC-SHA256(widget_secret, user_id) marks the session verified, with the secret of the widget whose `key` it is. A session belongs to that widget; a `visitor_token` of another widget of the workspace gives a new session of this widget for the same contact. `avatar_url` (https) is used only on a verified session: it is fetched server-side as the contact's picture (`avatar_source: "widget"`) unless an agent uploaded one |
 | GET | `/v1/widget/conversations` | visitor's chat tickets of the session's widget's brand `{id, subject, status, last_message_preview, last_message_at, ai_handoff}` (`ai_handoff`: the visitor asked for a person, contracts/ai.md). Conversations of another brand answer 404 |
-| POST | `/v1/widget/conversations` | `{body, attachment_ids?, page_url?, topic_id?}` → conversation + first message. `page_url`: the host page (https, up to 500 chars, no fragment), stored as the ticket's `page_url` and given to routing rules and the AI agent. `topic_id`: one of `WidgetConfig.topics` (422 otherwise). The ticket gets the widget's brand and `widget_id`, and its team by routing (contracts/teams.md "Routing") |
+| POST | `/v1/widget/conversations` | `{body, attachment_ids?, page_url?, topic_id?}` → conversation + first message. `body` may be empty when `attachment_ids` has a file; the conversation is then named after the first file. `page_url`: the host page (https, up to 500 chars, no fragment), stored as the ticket's `page_url` and given to routing rules and the AI agent. `topic_id`: one of `WidgetConfig.topics` (422 otherwise). The ticket gets the widget's brand and `widget_id`, and its team by routing (contracts/teams.md "Routing") |
 | GET | `/v1/widget/conversations/{id}/messages` | public messages only (no notes). Counts as the visitor being on the page (contracts/teams.md "Chat follow-up") |
 | POST | `/v1/widget/conversations/{id}/seen` | → 204. The widget sends it while the conversation is on screen and an agent's reply arrives, so the reply is not also emailed (contracts/teams.md "Chat follow-up"). 30 a minute per session |
-| POST | `/v1/widget/conversations/{id}/messages` | `{body, attachment_ids?, page_url?}` (`page_url`: the host page, https, up to 500 chars, given to the AI agent) |
+| POST | `/v1/widget/conversations/{id}/messages` | `{body, attachment_ids?, page_url?}` (`body` may be empty with a file) (`page_url`: the host page, https, up to 500 chars, given to the AI agent) |
 | POST | `/v1/widget/conversations/{id}/handoff` | → 204; ask for a person while the AI agent handles the conversation (contracts/agent.md) |
 | POST | `/v1/widget/conversations/{id}/actions/{action_id}` | `{decision: "confirm" \| "decline"}` → 204 (contracts/agent.md "Visitor actions") |
 | POST | `/v1/widget/conversations/{id}/messages/{message_id}/rating` | `{rating: "up" \| "down" \| null}` → 204 (contracts/agent.md "Ratings") |
-| POST | `/v1/widget/attachments` | multipart |
+| POST | `/v1/widget/attachments` | multipart. `403 attachments_off` while the session's widget has `attachments` off, and so is a message or new conversation with `attachment_ids` |
 | GET/PATCH | `/v1/widget/settings` | admin, agent-side: `WidgetSettings` below of the default brand's first widget (`widgets.settings`, mirrored to workspace `settings.widget`); PATCH merges the given keys, audit `widget.settings_updated` with the changed keys, publishes `widget.updated`. Every widget: `/v1/widgets` (contracts/teams.md) |
 
 ```ts
@@ -688,6 +688,8 @@ interface WidgetSettings {
   topics: { id: string /* kept when sent, else generated; 1..40 of A-Z a-z 0-9 _ - */; label: string /* 2..40 */; team_id: string | null /* a team of the workspace */ }[]  // at most 8
   offline_message: string               // up to 300 chars, plain text with newlines; "" = the translated default
   email_follow_up: boolean              // default true: agents' chat replies also go by email to a visitor with an email who is not on the page (contracts/teams.md "Chat follow-up")
+  attachments: boolean                  // default true: visitors may send files
+  attachment_types: string[]            // ids of the file type catalog below visitors may send; default [] = any file but programs and scripts
 }
 
 // GET /v1/widget/config. Public; Origin checked against the widget's allowed_origins.
@@ -703,6 +705,8 @@ interface WidgetConfig {
   launcher: "icon" | "label"; launcher_label: string; radius: "square" | "soft" | "round"
   title: string                         // the widget's title, else the brand name
   subtitle: string; suggestions: string[]; sound: boolean
+  attachments: boolean                  // visitors may send files; the widget hides attaching while false
+  attachment_extensions: string[] | null // extensions of the widget's attachment_types, for the file picker; null = any file but programs and scripts; [] while attachments is false
   team: { name: string /* first name */; avatar_url: string | null }[]  // up to 3 non-viewer members of the widget's team (else of the workspace), available first; [] when show_team is off
   ai_answers: boolean                   // the AI agent handles new conversations (contracts/agent.md)
   bot: { id: string | null; name: string; role: string; avatar_url: string /* a PNG of the look, or the picture */; look: BotLook; greeting: string /* "" = greeting */ }
@@ -713,6 +717,23 @@ interface WidgetConfig {
   brand: { name: string; color: string /* the brand's colour, else the workspace brand_color */ }
 }
 ```
+
+File types a widget may take (`attachment_types`; `internal/helpdesk/hd/filetypes.go`, mirrored in
+`web/src/components/widget/fileTypes.ts`). A visitor's upload is taken only when its extension is one of a
+picked type's and its first bytes are that type's; anything else is `422 file_type_not_allowed`, at upload
+and again, by the stored bytes, when a message or new conversation attaches it. With no types picked any
+file is taken. Programs and scripts are refused whatever they are named (`422 file_type_refused`), and
+agents' uploads are not limited by a widget. Stored ids this version does not know are dropped; a list of
+only those takes no file.
+
+| group | id: extensions, leading bytes |
+| --- | --- |
+| image | `png`: .png, PNG signature; `jpg`: .jpg .jpeg, `FF D8 FF`; `gif`: .gif, `GIF87a`/`GIF89a`; `webp`: .webp, RIFF `WEBP`; `heic`: .heic .heif, `ftyp` with a HEIF brand |
+| document | `pdf`: .pdf, `%PDF-`; `txt`: .txt and `csv`: .csv, text without control characters (any 8-bit encoding, or UTF-16 with a byte order mark); `rtf`: .rtf, `{\rtf`; `doc`: .doc, OLE; `docx`: .docx and `odt`: .odt, ZIP |
+| spreadsheet | `xls`: .xls, OLE; `xlsx`: .xlsx and `ods`: .ods, ZIP |
+| presentation | `ppt`: .ppt, OLE; `pptx`: .pptx and `odp`: .odp, ZIP |
+| media | `mp4`: .mp4 .m4v, `mov`: .mov and `m4a`: .m4a, `ftyp`; `mp3`: .mp3, `ID3` or an MPEG frame; `wav`: .wav, RIFF `WAVE` |
+| archive | `zip`: .zip, ZIP |
 
 Text settings (`launcher_label`, `title`, `subtitle`, `suggestions`) are trimmed, have
 runs of whitespace collapsed, and refuse `<`, `>` and control characters (`422 validation_failed`).
