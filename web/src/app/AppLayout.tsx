@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useWaitingAlerts } from "@/components/tickets/useWaitingAlerts";
-import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
 import { Dialog as D } from "radix-ui";
 import { identify } from "@/lib/analytics";
@@ -114,6 +114,7 @@ function soundForTicket(t: Ticket, me: string) {
 function useRealtimeConnection() {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const router = useRouter();
   const wid = useSession((s) => s.workspaceId);
   const uid = useSession((s) => s.user?.id);
   const suspended = useSession((s) => !!currentMembership(s)?.suspended);
@@ -125,7 +126,7 @@ function useRealtimeConnection() {
       workspaceId: wid,
       userId: uid,
       onNotification: (n) => {
-        notifyDesktop(n);
+        notifyDesktop(n, (path) => router.history.push(path));
         soundForNotification(n);
         if (n.type === "customer_replied") return;
         if (n.type === "ai_key_failed") void qc.invalidateQueries({ queryKey: qk.aiProvider });
@@ -172,7 +173,7 @@ function useRealtimeConnection() {
       },
     });
     return () => stopRealtime();
-  }, [wid, uid, suspended, qc, navigate]);
+  }, [wid, uid, suspended, qc, navigate, router]);
 }
 
 export function AppLayout() {
