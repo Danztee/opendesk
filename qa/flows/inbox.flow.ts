@@ -26,6 +26,8 @@ test("an agent edits and deletes an internal note", async ({ page, proof }) => {
   await expect(note.getByText("Follow-up on the billing question.", { exact: true })).toBeVisible();
   await note.getByRole("button", { name: "Note actions" }).click();
   await page.getByRole("menuitem", { name: "Edit note" }).click();
+  const ollieNotice = page.getByRole("button", { name: "Not now" });
+  if (await ollieNotice.isVisible()) await ollieNotice.click();
   const edit = note.getByRole("textbox", { name: "Edit note" });
   await edit.fill("Confirmed billing is per workspace, ");
   await edit.pressSequentially("@pri", { delay: 60 });
@@ -50,7 +52,6 @@ test("an agent edits and deletes an internal note", async ({ page, proof }) => {
   await dialog.getByRole("button", { name: "Delete note", exact: true }).click();
   const activity = page.getByText("Maya Chen deleted an internal note", { exact: true });
   await expect(activity).toBeVisible();
-  const ollieNotice = page.getByRole("button", { name: "Not now" });
   if (await ollieNotice.isVisible()) await ollieNotice.click();
   await proof.dwell();
   await proof.shot("note-deleted", { caption: "The deletion recorded in the ticket timeline" });
