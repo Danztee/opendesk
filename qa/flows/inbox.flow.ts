@@ -54,6 +54,7 @@ test("a live chat keeps the visitor who started it", async ({ page, proof }) => 
   await expect(main.getByRole("button", { name: "Change contact" })).toHaveCount(0);
   await proof.dwell();
   await proof.shot("chat-contact", { caption: "A live chat's contact has no Change contact button" });
+});
 
 test("an agent edits and deletes an internal note", async ({ page, proof }) => {
   await proof.open("/inbox/unassigned/1086");
