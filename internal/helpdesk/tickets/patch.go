@@ -219,19 +219,22 @@ func applyPatch(ctx context.Context, tx pgx.Tx, d *deps.Deps, wid, tid uuid.UUID
 			return nil, httpx.Validation("contact_id cannot be null")
 		}
 		to := p.Contact.Value
-		if err := hd.CheckRef(ctx, tx, wid, "contact", to); err != nil {
-			return nil, err
-		}
 		if !sameID(cur.Contact, &to) {
+			// A live chat is the visitor's own conversation in the widget: it stays theirs.
+			if cur.Channel == domain.ChannelChat {
+				return nil, httpx.Validation("a live chat stays with the visitor who started it")
+			}
+			toName, err := contactLabel(ctx, tx, wid, to)
+			if db.IsNotFound(err) {
+				return nil, httpx.Validation("contact not found in this workspace")
+			} else if err != nil {
+				return nil, err
+			}
 			var fromName string
 			if cur.Contact != nil {
-				if err := tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(name, ''), email::text, '') FROM contacts WHERE workspace_id = $1 AND id = $2`, wid, *cur.Contact).Scan(&fromName); err != nil {
+				if fromName, err = contactLabel(ctx, tx, wid, *cur.Contact); err != nil && !db.IsNotFound(err) {
 					return nil, err
 				}
-			}
-			var toName string
-			if err := tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(name, ''), email::text, '') FROM contacts WHERE workspace_id = $1 AND id = $2`, wid, to).Scan(&toName); err != nil {
-				return nil, err
 			}
 			next.Contact = &to
 			changes = append(changes, "contact_id")
@@ -600,6 +603,13 @@ func idOrNil(id *uuid.UUID) any {
 		return nil
 	}
 	return id.String()
+}
+
+// contactLabel is how the timeline names a contact: their name, else their email.
+func contactLabel(ctx context.Context, tx pgx.Tx, wid, id uuid.UUID) (string, error) {
+	var label string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(name, ''), email::text, '') FROM contacts WHERE workspace_id = $1 AND id = $2`, wid, id).Scan(&label)
+	return label, err
 }
 
 func contactActivityRef(id *uuid.UUID, name string) any {

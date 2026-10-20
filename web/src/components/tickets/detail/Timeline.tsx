@@ -81,7 +81,6 @@ function contactLabel(v: unknown, t: TFunction<"inbox">): string {
     if (typeof contact.name === "string" && contact.name) return contact.name;
     if (typeof contact.email === "string" && contact.email) return contact.email;
   }
-  if (typeof v === "string" && v) return /^[0-9a-f-]{36}$/i.test(v) ? t("activity.unknownContact") : v;
   return t("activity.noContact");
 }
 

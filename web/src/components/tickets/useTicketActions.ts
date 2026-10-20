@@ -131,8 +131,12 @@ export function useUpdateTicket() {
       }
       toast.error(e, "Couldn't update the ticket");
     },
-    onSuccess: (t) => {
+    onSuccess: (t, { patch }, ctx) => {
       settle(qc, t, me);
+      if (patch.contact_id !== undefined) {
+        // The ticket moved between the two contacts' past tickets.
+        for (const id of [ctx?.prev?.contact?.id, t.contact?.id]) if (id) void qc.invalidateQueries({ queryKey: qk.contactTickets(id) });
+      }
       if (t.tags.some((x) => !qc.getQueryData<Tag[]>(qk.tags)?.some((k) => k.id === x.id))) void qc.invalidateQueries({ queryKey: qk.tags });
     },
     onSettled: () => void qc.invalidateQueries({ queryKey: qk.counts }),

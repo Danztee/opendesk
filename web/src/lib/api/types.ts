@@ -482,6 +482,8 @@ export type ActivityType =
   | "csat_received"
   /** data: {key, name, from, to} with FieldValue | null values. */
   | "field_changed"
+  /** data: {from, to}, each {id, name} (name, else email) or null. */
+  | "contact_changed"
   | (string & {});
 export type Activity = {
   id: string;

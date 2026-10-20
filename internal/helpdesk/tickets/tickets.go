@@ -386,6 +386,10 @@ func registerTickets(d *deps.Deps, api huma.API) {
 				if patch, err = in.Body.Patch.toPatch(); err != nil {
 					return nil, err
 				}
+				// A ticket's customer is changed one ticket at a time, where the agent sees whose it is.
+				if patch.Contact.Set {
+					return nil, httpx.Validation("contact_id can only be changed on one ticket at a time")
+				}
 				if patch.CreateLabels, err = hd.CanCreateLabels(ctx, d.DB.Pool, p); err != nil {
 					return nil, httpx.Wrap(err)
 				}

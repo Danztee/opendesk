@@ -316,6 +316,23 @@ func TestPatchContact(t *testing.T) {
 	if got.Contact == nil || got.Contact.ID != adminContactID {
 		t.Fatalf("invalid or unauthorized patch changed contact: %+v", got.Contact)
 	}
+
+	// Setting the contact it already has records nothing.
+	e.Do("PATCH", "/v1/tickets/"+tk.ID.String(), ws.Agent.As(ws), map[string]any{"contact_id": adminContactID.String()}).Want(t, 200)
+	if n := countRows(t, e, `SELECT count(*) FROM activities WHERE ticket_id = $1 AND type = 'contact_changed'`, tk.ID); n != 2 {
+		t.Fatalf("contact_changed activities %d", n)
+	}
+	// An API key needs tickets:write; bulk never changes a contact.
+	read := e.APIKey(ws, "tickets:read")
+	e.Do("PATCH", "/v1/tickets/"+tk.ID.String(), hdtest.Auth{Bearer: read}, map[string]any{"contact_id": newContactID.String()}).Want(t, 403)
+	e.Do("POST", "/v1/tickets/bulk", ws.Agent.As(ws), map[string]any{"ids": []string{tk.ID.String()},
+		"patch": map[string]any{"contact_id": newContactID.String()}}).Want(t, 422)
+	// A live chat stays with its visitor, whose widget lists it by contact.
+	e.Exec(`UPDATE tickets SET channel = 'chat' WHERE id = $1`, tk.ID)
+	e.Do("PATCH", "/v1/tickets/"+tk.ID.String(), ws.Agent.As(ws), map[string]any{"contact_id": newContactID.String()}).Want(t, 422)
+	// A ticket of a private team the caller is not on is not there at all.
+	hidden, _ := privateTicket(t, e, ws)
+	e.Do("PATCH", "/v1/tickets/"+hidden.ID.String(), ws.Agent.As(ws), map[string]any{"contact_id": newContactID.String()}).Want(t, 404)
 }
 
 func TestBulkDeleteMerge(t *testing.T) {

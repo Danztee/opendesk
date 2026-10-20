@@ -58,6 +58,7 @@ function ticket(ctx: Ctx): Ticket {
 /** Team, brand and reply address checks for a patch (contracts/teams.md). */
 function checkPatch(ws: WsData, t: Ticket, p: TicketPatch) {
   if (p.contact_id && !ws.contacts.some((x) => x.id === p.contact_id)) throw invalid("Unknown contact");
+  if (p.contact_id && p.contact_id !== t.contact?.id && t.channel === "chat") throw invalid("A live chat stays with the visitor who started it");
   if (p.team_id && !ws.teams.some((x) => x.id === p.team_id)) throw invalid("Unknown team");
   if (p.brand_id !== undefined && !ws.brands.some((b) => b.id === p.brand_id)) throw invalid("Unknown brand");
   if (p.mailbox_id) {
