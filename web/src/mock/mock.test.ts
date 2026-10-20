@@ -17,6 +17,32 @@ async function call(method: string, path: string, body?: unknown) {
 describe("mock backend", () => {
   installMock();
 
+  it("turns off files in the widget", async () => {
+    expect((await call("GET", "/v1/widget/settings")).body.attachments).toBe(true);
+    expect((await call("PATCH", "/v1/widget/settings", { attachments: "no" })).status).toBe(422);
+    const off = (await call("PATCH", "/v1/widget/settings", { attachments: false })).body;
+    expect(off.attachments).toBe(false);
+  });
+
+  it("takes voice messages of up to the picked length", async () => {
+    expect((await call("GET", "/v1/widget/settings")).body).toMatchObject({ voice_messages: false, voice_max_seconds: 60 });
+    for (const bad of [4, 301, 30.5, "60"]) {
+      expect((await call("PATCH", "/v1/widget/settings", { voice_max_seconds: bad })).status, JSON.stringify(bad)).toBe(422);
+    }
+    const w = (await call("PATCH", "/v1/widget/settings", { voice_messages: true, voice_max_seconds: 120 })).body;
+    expect(w).toMatchObject({ voice_messages: true, voice_max_seconds: 120 });
+  });
+
+  it("limits the widget's files to the picked types", async () => {
+    expect((await call("GET", "/v1/widget/settings")).body.attachment_types).toEqual([]);
+    for (const bad of [["svg"], ["png", "exe"], "png"]) {
+      expect((await call("PATCH", "/v1/widget/settings", { attachment_types: bad })).status, JSON.stringify(bad)).toBe(422);
+    }
+    const w = (await call("PATCH", "/v1/widget/settings", { attachments: true, attachment_types: ["pdf", "jpg", "pdf"] })).body;
+    expect(w.attachment_types).toEqual(["jpg", "pdf"]);
+    expect((await call("PATCH", "/v1/widget/settings", { attachment_types: [] })).body.attachment_types).toEqual([]);
+  });
+
   it("breaks reports down by team and brand, and narrows them", async () => {
     const range = "from=2026-09-12&to=2026-10-11";
     const all = (await call("GET", `/v1/reports/overview?${range}`)).body;

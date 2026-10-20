@@ -55,3 +55,17 @@ test("a live chat keeps the visitor who started it", async ({ page, proof }) => 
   await proof.dwell();
   await proof.shot("chat-contact", { caption: "A live chat's contact has no Change contact button" });
 });
+
+test("play a visitor's voice message in a live chat", async ({ page, proof }) => {
+  await proof.open("/inbox/unassigned");
+  const tickets = page.getByRole("listbox", { name: "Tickets" });
+  await tickets.getByRole("option", { name: /Feature request: nested tags/ }).click();
+  const main = page.getByRole("main");
+  const voice = main.getByLabel("Voice message.wav", { exact: true });
+  await expect(voice).toBeVisible();
+  await expect(main.getByRole("link", { name: "Download Voice message.wav" })).toBeVisible();
+  await proof.chapter("Voice messages", "A visitor's recording plays in the thread, with a download link");
+  await voice.scrollIntoViewIfNeeded();
+  await proof.dwell();
+  await proof.shot("voice-message", { caption: "The visitor's voice message under their messages" });
+});
