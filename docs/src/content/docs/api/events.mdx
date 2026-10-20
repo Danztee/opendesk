@@ -41,7 +41,7 @@ Every state change that someone else should see is written as an event, in the s
 | Type | Visibility | Extra topics | Data |
 | --- | --- | --- | --- |
 | `ticket.created` | agents | | `{ ticket }` |
-| `ticket.updated` | agents | `user:<assignee>` when the assignee changes | `{ ticket, changes: ["status", "assignee_id", "fields", ...] }` |
+| `ticket.updated` | agents | `user:<assignee>` when the assignee changes | `{ ticket, changes: ["status", "contact_id", "assignee_id", "fields", ...] }` |
 | `ticket.deleted` | agents | | `{ ticket_id }` |
 | `message.created` | see below | `contact:<wid>:<cid>` when public | `{ ticket_id, message }` |
 | `message.updated` | agents | | `{ ticket_id, message }`, for delivery status changes and note edits |

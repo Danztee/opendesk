@@ -19,7 +19,7 @@ import type {
   TicketStatus,
   UserRef,
 } from "@/lib/api/types";
-import { db, userRef, type WsData } from "./db";
+import { contactRef, db, userRef, type WsData } from "./db";
 import { publish } from "./gateway";
 import { canSeeTicket, defaultBrand, teamRole } from "./teams";
 import { applyLabels, checkRequiredOnSolve, fieldDefs, fieldFiltersFromQuery, fieldsText, fieldSortValue, matchFields, mergeFields, type FieldFilterIn } from "./labels";
@@ -336,6 +336,13 @@ export function applyPatch(ws: WsData, t: Ticket, patch: TicketPatch, actor: Use
     t.severity = patch.severity ?? null;
     changes.push("severity");
     act("severity_changed", { from, to: t.severity });
+  }
+  if (patch.contact_id !== undefined && patch.contact_id !== t.contact?.id) {
+    const contact = ws.contacts.find((c) => c.id === patch.contact_id)!;
+    const from = t.contact;
+    t.contact = contactRef(contact);
+    changes.push("contact_id");
+    act("contact_changed", { from, to: t.contact });
   }
   if (patch.assignee_id !== undefined && (patch.assignee_id ?? null) !== (t.assignee?.id ?? null)) {
     const from = t.assignee;
