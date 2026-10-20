@@ -569,6 +569,20 @@ func typeLabel(t string) string {
 	return "this kind of notification"
 }
 
+// WebPush is what a browser shows for one notification (contracts/native.md "Web
+// Push"): the heading its email would have, the ticket's number and subject on one
+// short line, and the link a click opens.
+func WebPush(s Site, wid uuid.UUID, n Note) (title, body, link string) {
+	subject := strings.Join(strings.Fields(n.TicketSubject), " ")
+	switch {
+	case n.TicketID != nil:
+		body = clip(fmt.Sprintf("#%d %s", n.TicketNumber, subject), 120)
+	case subject != "":
+		body = clip(subject, 120) // a Collab conversation's subject
+	}
+	return describe(n).heading, body, noteURL(s, wid, n)
+}
+
 // noteURL is where a notification leads in the app, in its workspace.
 func noteURL(s Site, wid uuid.UUID, n Note) string {
 	ws := wid.String()
