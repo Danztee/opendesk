@@ -3,7 +3,7 @@ import { AlertCircle, Check, CheckCheck, Download, FileText, Globe, ImageOff, Lo
 import { memo, useMemo, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { tone } from "@/lib/tones";
-import type { Attachment, Message, Thread } from "@/lib/api/types";
+import type { Attachment, Member, Message, Thread } from "@/lib/api/types";
 import { api } from "@/lib/api/endpoints";
 import { q, qk } from "@/lib/queries";
 import { atLeast, useRole, useSession } from "@/lib/session";
@@ -22,7 +22,8 @@ import { ImproveAnswerButton } from "@/components/agent/quality";
 import { AiAuthorLabel, TranslateButton, TranslatedNote, useMessageTranslation } from "@/components/ai/ticket/MessageAi";
 import { BotRefFace } from "@/components/bots/BotFace";
 import { EmailFrame } from "./EmailFrame";
-import { RichEditor, type RichEditorHandle } from "@/components/editor/RichEditor";
+import { RichEditor } from "@/components/editor/RichEditor";
+import { mentionExtension, useSuggest } from "./suggestions";
 import { useConfirm } from "@/components/ui/confirm";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { toast } from "@/components/ui/toast";
@@ -261,6 +262,57 @@ function ThreadBar({ thread, actions, first }: { thread: Thread; actions?: Threa
   );
 }
 
+/** Edits a note in place, with the composer's @mentions; Escape or Cancel leaves it as it was. */
+function NoteEditor({ m, onDone }: { m: Message; onDone: () => void }) {
+  const { t } = useTranslation("inbox");
+  const qc = useQueryClient();
+  const [html, setHtml] = useState(m.body_html);
+  const { data: members } = useQuery(q.members());
+  const membersRef = useRef<Member[]>([]);
+  membersRef.current = members ?? [];
+  // The composer's SuggestionPopup shows the list; it is on the page whenever a note can be edited.
+  const extensions = useMemo(() => [mentionExtension(() => membersRef.current)], []);
+  const empty = isBlankHtml(html) && m.attachments.length === 0;
+  const save = useMutation({
+    mutationFn: (body_html: string) => api.tickets.editMessage(m.ticket_id, m.id, { body_html }),
+    onSuccess: (updated) => {
+      qc.setQueryData<Message[]>(qk.messages(m.ticket_id), (old) => old?.map((item) => (item.id === updated.id ? updated : item)));
+      qc.invalidateQueries({ queryKey: qk.activities(m.ticket_id) });
+      onDone();
+    },
+    onError: (error) => toast.error(error),
+  });
+  return (
+    <div className="rounded-md border border-line bg-surface">
+      <RichEditor
+        value={html}
+        onChange={setHtml}
+        autofocus
+        editable={!save.isPending}
+        toolbar="none"
+        extensions={extensions}
+        contentClassName="min-h-[48px] text-[13px]"
+        ariaLabel={t("message.edit")}
+        onSubmit={() => !empty && save.mutate(html)}
+        onKeyDown={(e) => {
+          // Escape first closes an open @mention list.
+          if (e.key !== "Escape" || useSuggest.getState().open) return false;
+          onDone();
+          return true;
+        }}
+      />
+      <div className="flex justify-end gap-1.5 px-2 pb-2">
+        <Button size="xs" variant="ghost" onClick={onDone}>
+          {t("message.cancel")}
+        </Button>
+        <Button size="xs" variant="primary" loading={save.isPending} disabled={empty} onClick={() => save.mutate(html)}>
+          {t("message.save")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export const MessageItem = memo(function MessageItem({
   m,
   onRetry,
@@ -304,17 +356,6 @@ export const MessageItem = memo(function MessageItem({
   const editableNote = note && mine;
   const deletableNote = note && (mine || admin);
   const [editing, setEditing] = useState(false);
-  const [html, setHtml] = useState(m.body_html);
-  const editor = useRef<RichEditorHandle>(null);
-  const save = useMutation({
-    mutationFn: (body_html: string) => api.tickets.editMessage(m.ticket_id, m.id, { body_html }),
-    onSuccess: (updated) => {
-      qc.setQueryData<Message[]>(qk.messages(m.ticket_id), (old) => old?.map((item) => (item.id === updated.id ? updated : item)));
-      qc.invalidateQueries({ queryKey: qk.activities(m.ticket_id) });
-      setEditing(false);
-    },
-    onError: (error) => toast.error(error),
-  });
   const remove = () =>
     confirm.show(
       t("message.deleteConfirm"),
@@ -388,7 +429,7 @@ export const MessageItem = memo(function MessageItem({
           </time>
         </Tooltip>
         {note && m.edited_at && <span className="shrink-0 text-[10.5px] text-fg-4">{t("message.edited")}</span>}
-        {deletableNote && !editing && (
+        {deletableNote && !editing && !m.id.startsWith("tmp-") && (
           <Menu>
             <MenuTrigger asChild>
               <button
@@ -403,10 +444,7 @@ export const MessageItem = memo(function MessageItem({
               {editableNote && (
                 <MenuItem
                   icon={<Pencil />}
-                  onSelect={() => {
-                    setHtml(m.body_html);
-                    setEditing(true);
-                  }}
+                  onSelect={() => setEditing(true)}
                 >
                   {t("message.edit")}
                 </MenuItem>
@@ -444,35 +482,7 @@ export const MessageItem = memo(function MessageItem({
         )}
         <TranslatedNote tr={tr} />
         {body.held > 0 && <HeldImages onLoad={() => setRemote(true)} />}
-        {editing ? (
-          <div className="rounded-md border border-line bg-surface">
-            <RichEditor
-              ref={editor}
-              value={html}
-              onChange={setHtml}
-              autofocus
-              editable={!save.isPending}
-              toolbar="none"
-              contentClassName="min-h-[48px] text-[13px]"
-              ariaLabel={t("message.edit")}
-              onSubmit={() => (!isBlankHtml(html) || m.attachments.length > 0) && save.mutate(html)}
-            />
-            <div className="flex justify-end gap-1.5 px-2 pb-2">
-              <Button size="xs" variant="ghost" onClick={() => setEditing(false)}>
-                {t("message.cancel")}
-              </Button>
-              <Button
-                size="xs"
-                variant="primary"
-                loading={save.isPending}
-                disabled={isBlankHtml(html) && m.attachments.length === 0}
-                onClick={() => save.mutate(html)}
-              >
-                {t("message.save")}
-              </Button>
-            </div>
-          </div>
-        ) : <Body body={body} />}
+        {editing ? <NoteEditor m={m} onDone={() => setEditing(false)} /> : <Body body={body} />}
         {m.has_quoted && (
           <div>
             <Tooltip content={showOriginal ? t("message.hideQuoted") : t("message.showOriginal")}>

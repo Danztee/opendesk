@@ -412,6 +412,11 @@ func containsMention(s, needle string) bool {
 }
 
 func notifyMentions(ctx context.Context, tx pgx.Tx, wid, tid uuid.UUID, msg domain.Message, author *uuid.UUID) error {
+	return notifyNewMentions(ctx, tx, wid, tid, msg, author, "", "")
+}
+
+// notifyNewMentions notifies the members msg mentions that its earlier body (prevHTML, prevText) did not.
+func notifyNewMentions(ctx context.Context, tx pgx.Tx, wid, tid uuid.UUID, msg domain.Message, author *uuid.UUID, prevHTML, prevText string) error {
 	if !strings.Contains(msg.BodyText, "@") && !strings.Contains(msg.BodyHTML, "data-mention") && !strings.Contains(msg.BodyHTML, "data-id") {
 		return nil
 	}
@@ -427,7 +432,14 @@ func notifyMentions(ctx context.Context, tx pgx.Tx, wid, tid uuid.UUID, msg doma
 	if err != nil {
 		return err
 	}
+	had := map[uuid.UUID]bool{}
+	for _, uid := range mentionedUsers(prevHTML, prevText, members, author) {
+		had[uid] = true
+	}
 	for _, uid := range mentionedUsers(msg.BodyHTML, msg.BodyText, members, author) {
+		if had[uid] {
+			continue
+		}
 		data := map[string]any{"message_id": msg.ID.String(), "by": idOrNil(author), "preview": hd.Excerpt(msg.BodyText, 140)}
 		if err := hd.Notify(ctx, tx, wid, uid, hd.NotifyMentioned, &tid, data); err != nil {
 			return err

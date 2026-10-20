@@ -114,3 +114,61 @@ func TestDeleteNoteKeepsSharedAttachmentObject(t *testing.T) {
 		t.Fatalf("shared attachment object removed: %v", err)
 	}
 }
+
+func TestInternalNoteMutationRefusals(t *testing.T) {
+	e, ws := newEnv(t)
+	tk := createTicket(t, e, ws, map[string]any{"channel": "api", "kind": "note"})
+	note := createInternalNote(t, e, ws, tk.ID.String())
+	path := "/v1/tickets/" + tk.ID.String() + "/messages/" + note.ID.String()
+
+	// An admin deletes any note, but edits only their own.
+	e.Do("PATCH", path, ws.Admin.As(ws), map[string]string{"body_html": "<p>Changed</p>"}).Want(t, 403)
+	// The routes are for signed-in members, whatever the key's scopes.
+	key := e.APIKey(ws, "tickets:write", "tickets:read")
+	e.Do("PATCH", path, hdtest.Auth{Bearer: key}, map[string]string{"body_html": "<p>Changed</p>"}).Want(t, 403)
+	e.Do("DELETE", path, hdtest.Auth{Bearer: key}, nil).Want(t, 403)
+	// A note is reached through its own ticket only.
+	other := createTicket(t, e, ws, map[string]any{"channel": "api", "kind": "note"})
+	e.Do("DELETE", "/v1/tickets/"+other.ID.String()+"/messages/"+note.ID.String(), ws.Agent.As(ws), nil).Want(t, 404)
+	e.Do("PATCH", path, ws.Agent.As(ws), map[string]string{"body_html": "<p> </p>"}).Want(t, 422)
+
+	// A ticket of a private team the caller is not on is not there at all.
+	hidden, _ := privateTicket(t, e, ws)
+	var secret domain.Message
+	e.Do("POST", "/v1/tickets/"+hidden.ID.String()+"/messages", ws.Admin.As(ws),
+		map[string]any{"kind": "note", "body_html": "<p>Team only</p>"}).Want(t, 201).JSON(t, &secret)
+	e.Do("DELETE", "/v1/tickets/"+hidden.ID.String()+"/messages/"+secret.ID.String(), ws.Agent.As(ws), nil).Want(t, 404)
+}
+
+func TestEditingANoteNotifiesOnlyNewMentions(t *testing.T) {
+	e, ws := newEnv(t)
+	tk := createTicket(t, e, ws, map[string]any{"channel": "api", "kind": "note"})
+	note := createInternalNote(t, e, ws, tk.ID.String())
+	path := "/v1/tickets/" + tk.ID.String() + "/messages/" + note.ID.String()
+	mention := func(u hdtest.User, name string) string {
+		return fmt.Sprintf(`<span data-type="mention" data-id="%s" data-mention="%s">@%s</span>`, u.ID, u.ID, name)
+	}
+	count := func(uid any) int {
+		return countRows(t, e, `SELECT count(*) FROM notifications WHERE ticket_id = $1 AND type = 'mentioned' AND user_id = $2`, tk.ID, uid)
+	}
+
+	e.Do("PATCH", path, ws.Agent.As(ws), map[string]string{"body_html": "<p>Ask " + mention(ws.Admin, "Adam") + "</p>"}).Want(t, 200)
+	if count(ws.Admin.ID) != 1 {
+		t.Fatalf("admin mentions %d", count(ws.Admin.ID))
+	}
+	e.Do("PATCH", path, ws.Agent.As(ws), map[string]string{"body_html": "<p>Ask " + mention(ws.Admin, "Adam") + " and " + mention(ws.Owner, "Olivia") + " today</p>"}).
+		Want(t, 200)
+	if count(ws.Admin.ID) != 1 || count(ws.Owner.ID) != 1 {
+		t.Fatalf("mentions admin %d owner %d", count(ws.Admin.ID), count(ws.Owner.ID))
+	}
+	var preview string
+	e.Scalar(`SELECT data->>'preview' FROM notifications WHERE ticket_id = $1 AND user_id = $2`, &preview, tk.ID, ws.Admin.ID)
+	if !strings.Contains(preview, "today") {
+		t.Fatalf("admin's mention still reads %q", preview)
+	}
+
+	e.Do("DELETE", path, ws.Agent.As(ws), nil).Want(t, 204)
+	if n := countRows(t, e, `SELECT count(*) FROM notifications WHERE ticket_id = $1 AND type = 'mentioned'`, tk.ID); n != 0 {
+		t.Fatalf("mentions left after delete %d", n)
+	}
+}

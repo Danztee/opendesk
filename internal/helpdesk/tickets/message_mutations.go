@@ -36,6 +36,8 @@ type messageMutationTarget struct {
 	authorType string
 	kind       string
 	threadID   *uuid.UUID
+	bodyHTML   string
+	bodyText   string
 }
 
 func registerMessageMutations(d *deps.Deps, api huma.API, tags []string) {
@@ -68,9 +70,10 @@ func registerMessageMutations(d *deps.Deps, api huma.API, tags []string) {
 				if target.authorType != "user" || target.authorID == nil || *target.authorID != p.UserID || p.Kind != auth.KindUser {
 					return httpx.Forbidden()
 				}
-				if strings.TrimSpace(bodyText) == "" {
+				// Empty as on create: no text, no inline image and no attachment.
+				if strings.TrimSpace(bodyText) == "" && !strings.Contains(cleanHTML, "<img") {
 					var hasAttachments bool
-					if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE message_id = $1)`, mid).Scan(&hasAttachments); err != nil {
+					if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE workspace_id = $1 AND message_id = $2)`, p.WorkspaceID, mid).Scan(&hasAttachments); err != nil {
 						return err
 					}
 					if !hasAttachments {
@@ -88,6 +91,16 @@ func registerMessageMutations(d *deps.Deps, api huma.API, tags []string) {
 				}
 				edited, err = domain.LoadMessage(ctx, tx, p.WorkspaceID, mid)
 				if err != nil {
+					return err
+				}
+				// Mentions already sent show the note as it reads now.
+				if _, err := tx.Exec(ctx, `UPDATE notifications SET data = jsonb_set(data, '{preview}', to_jsonb($4::text))
+				WHERE workspace_id = $1 AND ticket_id = $2 AND type = $3 AND data->>'message_id' = $5`,
+					p.WorkspaceID, tid, hd.NotifyMentioned, hd.Excerpt(bodyText, 140), mid.String()); err != nil {
+					return err
+				}
+				// Someone the edit mentions for the first time hears about it; the others already did.
+				if err := notifyNewMentions(ctx, tx, p.WorkspaceID, tid, edited, actor.UserID, target.bodyHTML, target.bodyText); err != nil {
 					return err
 				}
 				return domain.PublishMessageUpdated(ctx, tx, p.WorkspaceID, mid)
@@ -142,6 +155,11 @@ func registerMessageMutations(d *deps.Deps, api huma.API, tags []string) {
 				if _, err := tx.Exec(ctx, `DELETE FROM messages WHERE workspace_id = $1 AND ticket_id = $2 AND id = $3`, p.WorkspaceID, tid, mid); err != nil {
 					return err
 				}
+				// The note's mentions go with it, before their emails quote it.
+				if _, err := tx.Exec(ctx, `DELETE FROM notifications WHERE workspace_id = $1 AND ticket_id = $2 AND type = $3 AND data->>'message_id' = $4`,
+					p.WorkspaceID, tid, hd.NotifyMentioned, mid.String()); err != nil {
+					return err
+				}
 				for _, key := range keys {
 					var shared bool
 					if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE workspace_id = $1 AND storage_key = $2)`,
@@ -175,9 +193,9 @@ func registerMessageMutations(d *deps.Deps, api huma.API, tags []string) {
 
 func lockMessageMutationTarget(ctx context.Context, tx pgx.Tx, wid, ticketID, messageID uuid.UUID) (messageMutationTarget, error) {
 	var target messageMutationTarget
-	err := tx.QueryRow(ctx, `SELECT author_type, author_user_id, kind, thread_id FROM messages
+	err := tx.QueryRow(ctx, `SELECT author_type, author_user_id, kind, thread_id, body_html, body_text FROM messages
 		WHERE workspace_id = $1 AND ticket_id = $2 AND id = $3 FOR UPDATE`, wid, ticketID, messageID).
-		Scan(&target.authorType, &target.authorID, &target.kind, &target.threadID)
+		Scan(&target.authorType, &target.authorID, &target.kind, &target.threadID, &target.bodyHTML, &target.bodyText)
 	if db.IsNotFound(err) {
 		return target, httpx.NotFound("Message")
 	}

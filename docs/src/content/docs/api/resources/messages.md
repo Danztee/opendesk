@@ -3,7 +3,7 @@ title: Messages and attachments
 description: Read a ticket's conversation, send replies and notes, and upload attachments.
 ---
 
-Scopes: `tickets:read` to read, `tickets:write` to send, edit or delete.
+Scopes: `tickets:read` to read, `tickets:write` to send.
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -86,14 +86,9 @@ Notes are never sent to the customer.
 
 ## Edit or delete a note
 
-Agents can edit or delete their own plain internal notes. Admins can delete any internal note. A note in a side conversation and any reply are immutable through these routes. Editing takes sanitized `body_html` and sets `edited_at`; deleting removes the note and its attachment records, and removes stored files when no other attachment uses them. Both actions add a timeline entry that identifies the actor without including the note text.
+Agents can edit or delete their own plain internal notes. Admins can delete any internal note. A note in a side conversation and any reply are immutable through these routes. Editing takes sanitized `body_html` and sets `edited_at`; deleting removes the note and its attachment records, and removes stored files when no other attachment uses them. Both actions add a timeline entry that identifies the actor without including the note text. Editing notifies teammates the note now mentions for the first time.
 
-```sh
-curl -X PATCH https://api.opendesk.sh/v1/tickets/1042/messages/0192f0c5-... \
-  -H "Authorization: Bearer od_live_..." \
-  -H "Content-Type: application/json" \
-  -d '{ "body_html": "<p>Corrected note.</p>" }'
-```
+Editing and deleting are for teammates signed in to the app: an API key gets `403`, and a note written with an API key can be deleted by an admin.
 
 Edits publish `message.updated`; deletion returns `204` and publishes `message.deleted`.
 

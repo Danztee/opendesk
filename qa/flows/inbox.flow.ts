@@ -26,13 +26,21 @@ test("an agent edits and deletes an internal note", async ({ page, proof }) => {
   await expect(note.getByText("Follow-up on the billing question.", { exact: true })).toBeVisible();
   await note.getByRole("button", { name: "Note actions" }).click();
   await page.getByRole("menuitem", { name: "Edit note" }).click();
-  await note.getByRole("textbox", { name: "Edit note" }).fill("Confirmed billing is per workspace.");
+  const edit = note.getByRole("textbox", { name: "Edit note" });
+  await edit.fill("Confirmed billing is per workspace, ");
+  await edit.pressSequentially("@pri", { delay: 60 });
+  const mentions = page.getByRole("listbox", { name: "Mention a teammate" });
+  await expect(mentions.getByText("Priya Raman")).toBeVisible();
+  await proof.shot("note-edit-mention", { caption: "Editing the note, with @mentions as in the composer" });
+  await page.keyboard.press("Enter");
+  await expect(edit.getByText("@Priya Raman")).toBeVisible();
   await note.getByRole("button", { name: "Save" }).click();
-  await expect(note.getByText("Confirmed billing is per workspace.", { exact: true })).toBeVisible();
+  await expect(note.getByText("Confirmed billing is per workspace,", { exact: false })).toBeVisible();
+  await expect(note.getByText("@Priya Raman")).toBeVisible();
   await expect(note.getByText("Edited", { exact: true })).toBeVisible();
-  await proof.chapter("Edit the note", "Correct the note and see its edited marker");
+  await proof.chapter("Edit the note", "Correct the note, mention a teammate and see its edited marker");
   await proof.dwell();
-  await proof.shot("note-edited", { target: note, caption: "The corrected note, marked as edited" });
+  await proof.shot("note-edited", { target: note, caption: "The corrected note with its mention, marked as edited" });
 
   await note.getByRole("button", { name: "Note actions" }).click();
   await page.getByRole("menuitem", { name: "Delete note" }).click();
