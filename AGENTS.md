@@ -216,11 +216,20 @@ Errors, logging, data
   behind triage, never a name in the UI.
 - Motion is subtle and fast (shared presets in `web/src/lib/motion.ts`), always honours
   reduced motion. Empty pages use the shared EmptyState, never a lone icon and one line.
+  A clock never ticks high in the tree: a live duration runs `useNow` in the small component
+  that shows it, and app-wide state wakes on a timer for the moment it changes, so nothing
+  redraws the shell every second and stutters an animation.
 - Light and dark themes. Dense, calm, keyboard-first. Learn from `~/projects/warmbly/web`
   for patterns (drawers, pickers, confirm dialogs, optimistic updates, realtime
   invalidation), but restyle everything to the opendesk palette.
 - Never native `confirm`/`alert`, native checkboxes or number spinners. Every popover
   closes on click-away and Escape. A page is routed, linked, titled and prefetched.
+  Tooltips open after 200 ms (`TooltipProvider` in `web/src/app/RootLayout.tsx`).
+- A conversation's next step is always in reach, never at the end of its scroll: Collab pins
+  the comment field, the comment count and the reply buttons under the thread
+  (`CommentBar` in `web/src/components/collab/Comments.tsx`). It is one line until it is used,
+  keeps an unsent comment per conversation, and steps the reply buttons aside while a reply is
+  open. A new view with a conversation and a way to answer it follows the same rule.
 - Prefer realtime over polling: apply socket events to the TanStack Query cache.
 - Copy: sentence case, plain words, no em dashes.
 - The social card (`site/public/og.jpg`, also the docs' and GitHub's) is the hero's app window
