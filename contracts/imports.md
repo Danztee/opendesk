@@ -193,6 +193,8 @@ the encoding, a line that cannot be read, more than 500,000 rows, no rows under 
   sanitized as it is; its images stay where the source hosts them.
 - Requesters become contacts, found by email (an existing contact is matched and only gets a name
   or phone it lacks) or created with their name and phone; companies are found by domain or name, or created.
+- NUL bytes (U+0000) are dropped from every text a ticket or article saves (subjects, bodies, names,
+  addresses, tags, file names, titles), since Postgres cannot store them. Source ids are kept as they are.
 - Agents are not invited and teams are not created: they map to existing members and teams.
   Automations, macros and saved replies, SLA policies, views, custom fields and their values, business
   hours, side conversations and the source's settings are not imported.

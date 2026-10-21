@@ -1261,3 +1261,51 @@ func TestIsolationAndRoles(t *testing.T) {
 	e.Do("GET", path, key, nil).Want(t, 200) // reading is settings:read
 	e.Do("GET", path, e.ws.Owner.As(e.ws), nil).Want(t, 200)
 }
+
+// NUL bytes, which Postgres text cannot hold, are dropped from what a ticket and an article
+// save: the subject, the subject taken from the first message, the people on it, tags,
+// bodies and file names. None of them fails the ticket or the article.
+func TestNULBytesDoNotFailATicket(t *testing.T) {
+	e := newEnv(t)
+	bob := &source.Person{ID: "u1", Email: "bob@customer.test", Name: "Bob\x00 Buyer", Phone: "+1 555\x00 0100", Company: "Bob\x00co"}
+	e.f.articles = []source.Article{{ID: "art9", Title: "Reset\x00 it", HTML: "<p>Steps\x00</p>", Collection: "Acc\x00ount", Published: true, CreatedAt: base, UpdatedAt: base}}
+	e.f.tickets = []source.Ticket{
+		{ID: "21", Ref: "#21", Subject: "Invoice\x00 attached", Status: "open", Requester: bob, Tags: []string{"bil\x00ling"},
+			CreatedAt: base, UpdatedAt: base, Loaded: true,
+			Messages: []source.Message{{ID: "21-1", Author: *bob, HTML: "<p>Here\x00 it is</p>", Text: "Here\x00 it is", CreatedAt: base,
+				Attachments: []source.Attachment{{ID: "f21", Name: "inv\x00oice.txt", URL: "https://files.test/f21"}}}}},
+		{ID: "22", Ref: "#22", Subject: "", Status: "open", Requester: bob, CreatedAt: base, UpdatedAt: base, Loaded: true,
+			Messages: []source.Message{{ID: "22-1", Author: *bob, Text: "Where\x00 is my order", CreatedAt: base}}},
+	}
+	e.f.files = map[string][]byte{"https://files.test/f21": []byte("total: 10")}
+	x := e.start(t, e.zendeskBody())
+	done := e.drive(t, x.ID)
+	if done.Status != StatusCompleted {
+		t.Fatalf("status %s %s", done.Status, done.LastError)
+	}
+	if done.Counts.Tickets != 2 || done.Counts.Failed != 0 || done.Counts.Messages != 2 || done.Counts.Attachments != 1 ||
+		done.Counts.Articles != 1 || len(done.Problems) != 0 {
+		t.Fatalf("counts %+v problems %+v", done.Counts, done.Problems)
+	}
+	var subject string
+	e.Scalar(`SELECT subject FROM tickets WHERE id = $1`, &subject, e.ticketByRef(t, "21"))
+	if subject != "Invoice attached" {
+		t.Errorf("subject %q", subject)
+	}
+	e.Scalar(`SELECT subject FROM tickets WHERE id = $1`, &subject, e.ticketByRef(t, "22"))
+	if !strings.HasPrefix(subject, "Where is my order") {
+		t.Errorf("subject from the first message %q", subject)
+	}
+	if n := e.count(t, `SELECT count(*) FROM contacts WHERE workspace_id = $1 AND name = 'Bob Buyer'`, e.ws.ID); n != 1 {
+		t.Errorf("contacts named Bob Buyer %d", n)
+	}
+	if got := e.labels(t, e.ticketByRef(t, "21")); !slices.Contains(got, "billing") {
+		t.Errorf("labels %v", got)
+	}
+	if n := e.count(t, `SELECT count(*) FROM kb_articles WHERE workspace_id = $1 AND title = 'Reset it'`, e.ws.ID); n != 1 {
+		t.Errorf("articles titled Reset it %d", n)
+	}
+	if bob.Name != "Bob\x00 Buyer" {
+		t.Error("the source's data was changed in place")
+	}
+}
