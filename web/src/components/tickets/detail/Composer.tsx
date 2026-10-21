@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { tone } from "@/lib/tones";
 import { create } from "zustand";
 import { DropdownMenu as M } from "radix-ui";
-import type { Activity, Attachment, Mailbox, Member, Message, SavedReply, Thread, Ticket, TicketStatus } from "@/lib/api/types";
+import type { Activity, Attachment, Mailbox, Member, Message, SavedReply, Thread, Ticket, TicketDraft, TicketStatus } from "@/lib/api/types";
 import { api, type SendMessageBody } from "@/lib/api/endpoints";
 import { errorMessage } from "@/lib/api/client";
 import { q, qk, upsertInList } from "@/lib/queries";
@@ -37,6 +37,7 @@ import { applyPatch, useUpdateTicket } from "../useTicketActions";
 import { patchTicketEverywhere } from "@/lib/ticketCache";
 import { ComposerAiMenu, ComposerAiStatus, ComposerSources, useComposerAi } from "@/components/ai/ticket/ComposerAi";
 import { SuggestedReplyCard } from "./SuggestedReply";
+import { SharedDraftBar } from "./SharedDraft";
 import { addressLabel, fromLine, replyAddresses, TeamDot, useTeamsCtx, type TeamsCtx } from "../teams";
 
 type Mode = "reply" | "note" | "thread";
@@ -165,7 +166,10 @@ function useSend(ticket: Ticket, ctx: TeamsCtx) {
       const prevTicket = qc.getQueryData<Ticket>(qk.ticket(ticket.id));
       if ((body.status || body.mailbox_id) && prevTicket)
         patchTicketEverywhere(qc, applyPatch(qc, prevTicket, { status: body.status, mailbox_id: body.mailbox_id }), user.id);
-      return { prevTicket };
+      // A reply going out clears the ticket's shared draft (contracts/api.md "Drafts").
+      const prevDraft = body.kind === "reply" ? qc.getQueryData<TicketDraft | null>(qk.ticketDraft(ticket.id)) : undefined;
+      if (prevDraft) qc.setQueryData(qk.ticketDraft(ticket.id), null);
+      return { prevTicket, prevDraft };
     },
     onSuccess: (m, { tempId }) => {
       qc.setQueryData<Message[]>(qk.messages(ticket.id), (old) => {
@@ -181,6 +185,7 @@ function useSend(ticket: Ticket, ctx: TeamsCtx) {
         old?.map((x) => (x.id === tempId ? { ...x, delivery_status: "failed", delivery_error: errorMessage(e, "Not sent") } : x)),
       );
       if (ctx?.prevTicket) patchTicketEverywhere(qc, ctx.prevTicket, user.id);
+      if (ctx?.prevDraft) qc.setQueryData(qk.ticketDraft(ticket.id), ctx.prevDraft);
     },
     onSettled: () => void qc.invalidateQueries({ queryKey: qk.counts }),
   });
@@ -391,6 +396,19 @@ export const Composer = forwardRef<ComposerHandle, { ticket: Ticket; disabled?: 
     },
   }));
 
+  // The ticket's shared draft goes into the reply box; discarding it takes it back out.
+  const takeShared = useCallback(
+    (html: string) => {
+      setDraft({ mode: "reply", html });
+      editor.current?.setHtml(html);
+    },
+    [setDraft],
+  );
+  const dropShared = useCallback(() => {
+    setDraft({ html: "" });
+    editor.current?.clear();
+  }, [setDraft]);
+
   // Presence: "replying" while a draft exists, "viewing" otherwise.
   const hasDraft = !!draft.html;
   useEffect(() => {
@@ -526,6 +544,7 @@ export const Composer = forwardRef<ComposerHandle, { ticket: Ticket; disabled?: 
             }}
           />
         )}
+        {!disabled && <SharedDraftBar ticket={ticket} html={draft.html} onUse={takeShared} onClear={dropShared} />}
         <AnimatePresence initial={false}>
           {others.length > 0 && mode === "reply" && (
             <motion.div
