@@ -60,19 +60,20 @@ func (m testMail) raw() []byte {
 
 // fakeGmail is a small Gmail API.
 type fakeGmail struct {
-	t       *testing.T
-	mu      sync.Mutex
-	labels  []map[string]any
-	msgs    map[string]*gmailFakeMsg
-	order   []string // oldest first
-	history int
-	changes []map[string]any // history records
-	gone    bool             // history answers 404
-	status  int              // every call answers this when set
-	modify  []map[string]any
-	trashed []string
-	sent    []string // multipart bodies
-	gets    int
+	t               *testing.T
+	mu              sync.Mutex
+	labels          []map[string]any
+	msgs            map[string]*gmailFakeMsg
+	order           []string // oldest first
+	history         int
+	changes         []map[string]any // history records
+	historyPageSize int
+	gone            bool // history answers 404
+	status          int  // every call answers this when set
+	modify          []map[string]any
+	trashed         []string
+	sent            []string // multipart bodies
+	gets            int
 	// settings is the account's sendAs and vacation (settings_test.go).
 	settings fakeGmailSettings
 	// drafts are the drafts API and label colours (drafts_test.go).
@@ -180,7 +181,18 @@ func (g *fakeGmail) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				list = append(list, c)
 			}
 		}
-		reply(map[string]any{"history": list, "historyId": strconv.Itoa(g.history)})
+		offset, _ := strconv.Atoi(q.Get("pageToken"))
+		pageSize := len(list)
+		if g.historyPageSize > 0 {
+			pageSize = g.historyPageSize
+		}
+		end := min(offset+pageSize, len(list))
+		page := list[offset:end]
+		next := ""
+		if end < len(list) {
+			next = strconv.Itoa(end)
+		}
+		reply(map[string]any{"history": page, "historyId": strconv.Itoa(g.history), "nextPageToken": next})
 	case r.Method == "POST" && path == "/messages/batchModify":
 		var in map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&in)
@@ -379,6 +391,78 @@ func TestGmailSync(t *testing.T) {
 	}
 	if _, err := w.d.Storage.Get(context.Background(), m3.RawKey); err == nil {
 		t.Fatal("the raw message is still in storage")
+	}
+}
+
+func TestGmailSyncResumesWhenImportBudgetIsExhausted(t *testing.T) {
+	w := newWorld(t)
+	g := newFakeGmail(t)
+	w.useGmail(g)
+	a := w.account(w.agent, ProviderGoogle, VisibilityPrivate, Audience{})
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < initialMax+1; i++ {
+		id := fmt.Sprintf("burst-%03d", i)
+		g.add(id, id, []string{"INBOX"}, testMail{from: "sender@example.com", to: a.Email,
+			subject: "Burst", msgID: id + "@example.com", body: "Message"})
+		g.record("messagesAdded", id)
+	}
+
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1`, a.ID); got != initialMax {
+		t.Fatalf("first sync imported %d messages, want %d", got, initialMax)
+	}
+	var state gmailSyncState
+	if err := json.Unmarshal(w.reload(a).SyncState, &state); err != nil || len(state.PendingIDs) != 1 {
+		t.Fatalf("pending changes after first sync: %+v, %v", state, err)
+	}
+
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1`, a.ID); got != initialMax+1 {
+		t.Fatalf("second sync imported %d messages, want %d", got, initialMax+1)
+	}
+}
+
+func TestGmailSyncResumesHistoryPagination(t *testing.T) {
+	w := newWorld(t)
+	g := newFakeGmail(t)
+	w.useGmail(g)
+	a := w.account(w.agent, ProviderGoogle, VisibilityPrivate, Audience{})
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	g.historyPageSize = 1
+	for i := 0; i < 51; i++ {
+		id := fmt.Sprintf("page-%03d", i)
+		g.add(id, id, []string{"INBOX"}, testMail{from: "sender@example.com", to: a.Email,
+			subject: "Page", msgID: id + "@example.com", body: "Message"})
+		g.record("messagesAdded", id)
+	}
+
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1`, a.ID); got != 50 {
+		t.Fatalf("first sync imported %d messages, want 50", got)
+	}
+	var state gmailSyncState
+	if err := json.Unmarshal(w.reload(a).SyncState, &state); err != nil ||
+		state.HistoryID != "100" || state.HistoryPageStartID != "100" || state.HistoryPageToken == "" {
+		t.Fatalf("history continuation after first sync: %+v, %v", state, err)
+	}
+
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1`, a.ID); got != 51 {
+		t.Fatalf("second sync imported %d messages, want 51", got)
 	}
 }
 

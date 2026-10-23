@@ -255,16 +255,26 @@ type gmailChange struct {
 	Deleted  bool
 }
 
+// gmailSyncState keeps a pending history page and changes skipped by the per-pass budget.
+type gmailSyncState struct {
+	HistoryID          string   `json:"history_id"`
+	HistoryPageStartID string   `json:"history_page_start_id,omitempty"`
+	HistoryPageToken   string   `json:"history_page_token,omitempty"`
+	PendingIDs         []string `json:"pending_ids,omitempty"`
+}
+
 // errHistoryGone means the stored history id is older than Gmail keeps: sync from scratch.
 var errHistoryGone = &providerError{msg: "Gmail no longer has the changes since the last sync.", notFound: true}
 
-// history reads the changes since a history id, in order, and the newest history id.
-func (g *gmailProvider) history(ctx context.Context, since string) ([]gmailChange, string, error) {
+const gmailHistoryPagesPerPass = 50
+
+// history reads up to one pass of changes since a history id and returns the next page.
+func (g *gmailProvider) history(ctx context.Context, since, pageToken string) ([]gmailChange, string, string, error) {
 	changes := []gmailChange{}
 	index := map[string]int{}
 	latest := since
-	token := ""
-	for pages := 0; pages < 50; pages++ {
+	token := pageToken
+	for pages := 0; pages < gmailHistoryPagesPerPass; pages++ {
 		v := url.Values{"startHistoryId": {since}, "maxResults": {"500"},
 			"historyTypes": {"messageAdded", "messageDeleted", "labelAdded", "labelRemoved"}}
 		if token != "" {
@@ -282,9 +292,9 @@ func (g *gmailProvider) history(ctx context.Context, since string) ([]gmailChang
 		}
 		if err := g.do(ctx, http.MethodGet, "/history?"+v.Encode(), nil, &page); err != nil {
 			if isNotFound(err) {
-				return nil, "", errHistoryGone
+				return nil, "", "", errHistoryGone
 			}
-			return nil, "", err
+			return nil, "", "", err
 		}
 		note := func(m gmailMessage, added, deleted bool) {
 			i, ok := index[m.ID]
@@ -324,12 +334,12 @@ func (g *gmailProvider) history(ctx context.Context, since string) ([]gmailChang
 		if page.HistoryID != "" {
 			latest = page.HistoryID
 		}
-		if page.NextPageToken == "" {
+		token = page.NextPageToken
+		if token == "" {
 			break
 		}
-		token = page.NextPageToken
 	}
-	return changes, latest, nil
+	return changes, latest, token, nil
 }
 
 // gmailState is a message's state from its labels.
@@ -461,17 +471,30 @@ func (g *gmailProvider) Send(ctx context.Context, raw []byte, info SendInfo) (Se
 // syncGmail runs one pass: a first sync without a history id (or when Gmail no longer
 // has it), else the history since it.
 func (s *service) syncGmail(ctx context.Context, p *pass, g *gmailProvider) error {
-	var st struct {
-		HistoryID string `json:"history_id"`
-	}
+	var st gmailSyncState
 	_ = json.Unmarshal(p.a.SyncState, &st)
 	if st.HistoryID != "" {
-		changes, latest, err := g.history(ctx, st.HistoryID)
+		since := st.HistoryID
+		if st.HistoryPageToken != "" {
+			since = st.HistoryPageStartID
+		}
+		changes, latest, nextPage, err := g.history(ctx, since, st.HistoryPageToken)
 		if err == nil {
-			if err := s.applyGmailChanges(ctx, p, g, changes); err != nil {
+			ordered := gmailChangesWithPending(changes, st.PendingIDs)
+			skipped, err := s.applyGmailChanges(ctx, p, g, ordered)
+			if err != nil {
 				return err
 			}
-			return s.saveAccountState(ctx, p.a, map[string]any{"history_id": latest})
+			st.PendingIDs = pendingGmailChanges(st.PendingIDs, changes, skipped)
+			if nextPage == "" {
+				st.HistoryID = latest
+				st.HistoryPageStartID = ""
+				st.HistoryPageToken = ""
+			} else {
+				st.HistoryPageStartID = since
+				st.HistoryPageToken = nextPage
+			}
+			return s.saveAccountState(ctx, p.a, st)
 		}
 		if err != errHistoryGone {
 			return err
@@ -503,24 +526,81 @@ func (s *service) syncGmail(ctx context.Context, p *pass, g *gmailProvider) erro
 	for _, id := range ids {
 		changes = append(changes, gmailChange{ID: id, Added: true})
 	}
-	if err := s.applyGmailChanges(ctx, p, g, changes); err != nil {
+	ordered := gmailChangesWithPending(changes, st.PendingIDs)
+	skipped, err := s.applyGmailChanges(ctx, p, g, ordered)
+	if err != nil {
 		return err
 	}
-	return s.saveAccountState(ctx, p.a, map[string]any{"history_id": historyID})
+	return s.saveAccountState(ctx, p.a, gmailSyncState{
+		HistoryID:  historyID,
+		PendingIDs: pendingGmailChanges(st.PendingIDs, changes, skipped),
+	})
+}
+
+func gmailChangesWithPending(changes []gmailChange, pending []string) []gmailChange {
+	pendingSet := make(map[string]bool, len(pending))
+	byID := make(map[string]gmailChange, len(changes))
+	for _, id := range pending {
+		pendingSet[id] = true
+	}
+	ordered := make([]gmailChange, 0, len(changes)+len(pending))
+	for _, c := range changes {
+		byID[c.ID] = c
+		if !pendingSet[c.ID] {
+			ordered = append(ordered, c)
+		}
+	}
+	seen := make(map[string]bool, len(pending))
+	// applyGmailChanges takes the newest changes first when its budget is full, so
+	// append the older backlog in reverse to process its oldest entries first.
+	for i := len(pending) - 1; i >= 0; i-- {
+		id := pending[i]
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		c, ok := byID[id]
+		if !ok {
+			c = gmailChange{ID: id, Added: true}
+		}
+		ordered = append(ordered, c)
+	}
+	return ordered
+}
+
+func pendingGmailChanges(previous []string, changes []gmailChange, skipped []string) []string {
+	skippedSet := make(map[string]bool, len(skipped))
+	for _, id := range skipped {
+		skippedSet[id] = true
+	}
+	seen := make(map[string]bool, len(skipped))
+	pending := make([]string, 0, len(skipped))
+	appendSkipped := func(id string) {
+		if skippedSet[id] && !seen[id] {
+			seen[id] = true
+			pending = append(pending, id)
+		}
+	}
+	for _, id := range previous {
+		appendSkipped(id)
+	}
+	for _, c := range changes {
+		appendSkipped(c.ID)
+	}
+	return pending
 }
 
 // applyGmailChanges stores what changed: known messages get their labels (read again
 // when history did not carry them), new ones are fetched and stored, deleted ones removed.
-func (s *service) applyGmailChanges(ctx context.Context, p *pass, g *gmailProvider, changes []gmailChange) error {
-	// At most initialMax new messages per pass, the newest; older ones in a larger burst
-	// (old mail moved back to the inbox in bulk) are left out.
+func (s *service) applyGmailChanges(ctx context.Context, p *pass, g *gmailProvider, changes []gmailChange) ([]string, error) {
+	// At most initialMax new messages per pass; the rest stay in the sync backlog.
 	all := make([]string, 0, len(changes))
 	for _, c := range changes {
 		all = append(all, c.ID)
 	}
 	stored, err := p.lookupMany(ctx, s.d.DB.Pool, all)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	skip := map[string]bool{}
 	fresh := 0
@@ -529,6 +609,12 @@ func (s *service) applyGmailChanges(ctx context.Context, p *pass, g *gmailProvid
 			if fresh++; fresh > initialMax {
 				skip[c.ID] = true
 			}
+		}
+	}
+	skipped := make([]string, 0, len(skip))
+	for _, c := range changes {
+		if skip[c.ID] {
+			skipped = append(skipped, c.ID)
 		}
 	}
 	for len(changes) > 0 {
@@ -541,7 +627,7 @@ func (s *service) applyGmailChanges(ctx context.Context, p *pass, g *gmailProvid
 		}
 		known, err := p.lookupMany(ctx, s.d.DB.Pool, remoteIDs)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		// Network first, then one transaction for the chunk.
 		fetched := map[string]*newMessage{}
@@ -562,7 +648,7 @@ func (s *service) applyGmailChanges(ctx context.Context, p *pass, g *gmailProvid
 					continue
 				}
 				if err != nil {
-					return err
+					return nil, err
 				}
 				c.LabelIDs, c.Labels = m.LabelIDs, true
 				continue
@@ -577,7 +663,7 @@ func (s *service) applyGmailChanges(ctx context.Context, p *pass, g *gmailProvid
 				continue
 			}
 			if err != nil {
-				return err
+				return nil, err
 			}
 			c.LabelIDs, c.Labels, c.ThreadID = m.LabelIDs, true, m.ThreadID
 			if known[c.ID] == nil {
@@ -608,8 +694,8 @@ func (s *service) applyGmailChanges(ctx context.Context, p *pass, g *gmailProvid
 			return nil
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return skipped, nil
 }
