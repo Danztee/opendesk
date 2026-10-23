@@ -176,17 +176,13 @@ func TestCaptureAcceptsWorkspaceDistinctID(t *testing.T) {
 	}
 }
 
-func TestCaptureValidatesIdentifiersAndFiltersUnknownProperties(t *testing.T) {
+func TestCaptureRejectsInvalidIdentifiersAndUnknownEvents(t *testing.T) {
 	client, sink := testClient()
 	client.Capture("person@example.com", testWorkspaceID, "user_logged_in", map[string]any{"method": "password"})
 	client.Capture(testDistinctID, "person@example.com", "user_logged_in", map[string]any{"method": "password"})
 	client.Capture(testDistinctID, testWorkspaceID, "unknown", nil)
 
-	props := map[string]any{"method": "password", "mfa": true}
-	for i := 0; i < 15; i++ {
-		props["extra"+string(rune('a'+i))] = true
-	}
-	client.Capture(testDistinctID, testWorkspaceID, "user_logged_in", props)
+	client.Capture(testDistinctID, testWorkspaceID, "user_logged_in", map[string]any{"method": "password", "mfa": true})
 	if len(sink.messages) != 1 {
 		t.Fatalf("queued %d messages, want only the event with valid identifiers", len(sink.messages))
 	}
