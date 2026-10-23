@@ -1917,8 +1917,9 @@ export type TemplateFilter = { name: string; group: "text" | "list" | "number" |
 export type TemplateTag = { name: string; syntax: string; description: string };
 export type TemplateSlotKey = "content" | "signature" | "history" | "survey";
 export type TemplateSlot = { key: TemplateSlotKey; label: string; description: string; required_in: TemplateKind[] | null };
-export type TemplateKind = "reply" | "signature" | "personal_signature" | "auto_reply" | "layout" | "csat" | "subject";
-export type TemplateCatalog = { variables: TemplateVariable[]; slots: TemplateSlot[]; filters: TemplateFilter[]; tags?: TemplateTag[] };
+export type TemplateKind = "reply" | "signature" | "personal_signature" | "auto_reply" | "layout" | "csat" | "subject" | "collab_signature";
+/** kind_groups: the variable groups of the kinds that take only some (a Collab signature). */
+export type TemplateCatalog = { variables: TemplateVariable[]; slots: TemplateSlot[]; filters: TemplateFilter[]; tags?: TemplateTag[]; kind_groups?: Partial<Record<TemplateKind, TemplateGroup[]>> };
 export type TemplateProblem = { message: string; token: string };
 
 export type EmailLayoutOptions = {
@@ -2015,10 +2016,57 @@ export type MailAccount = {
   /** Null for IMAP, and while it was never read. */
   out_of_office: MailOutOfOffice | null;
   out_of_office_sync: MailSettingSync;
+  /** The addresses it sends from, its own first (contracts/collab.md "Addresses"). */
+  identities: MailIdentity[];
+  /** The address new mail goes out from. */
+  default_from: string;
 };
+
+/**
+ * An address an account sends from: its own (primary; its From name and signature are the
+ * account's) or another one: Gmail's send-as addresses, aliases added by hand for Microsoft and IMAP.
+ */
+export type MailIdentity = {
+  /** Null for the account's own address. */
+  id: string | null;
+  email: string;
+  /** The From name; empty uses the account's. */
+  display_name: string;
+  signature_html: string;
+  /** Replies go here when set. */
+  reply_to: string;
+  primary: boolean;
+  /** New mail goes out from it. */
+  default: boolean;
+  source: "account" | "provider" | "manual";
+  /** pending: Gmail is waiting for the address's owner to confirm it. */
+  verification: "accepted" | "pending";
+  can_send: boolean;
+  signature_sync: MailIdentitySync;
+  display_name_sync: MailIdentitySync;
+  signature_synced_at: string | null;
+  /** The From name has variables, so it is kept in opendesk and Gmail keeps its own. */
+  display_name_local?: boolean;
+  /** The signature has variables, so it is kept in opendesk and Gmail keeps its own. */
+  signature_local?: boolean;
+  /** The From name (its own, else the account's) filled for you. */
+  from_name?: string;
+  /** The signature filled for you; null when it has no variables. */
+  filled_signature_html?: string | null;
+};
+
+/** An address's From name and signature as typed, filled for you (POST .../identities/preview). */
+export type MailIdentityPreview = { from_name: string; from: string; signature_html: string; from_name_problem: string; problems: TemplateProblem[] };
+export type MailIdentityPreviewBody = { email?: string; display_name: string; signature_html?: string };
 
 /** two_way: read from the provider and changed there too; read_only: read only; none: opendesk only (or not available). */
 export type MailSettingSync = "two_way" | "read_only" | "none";
+
+/**
+ * How an address's From name and signature sync: as an account's setting, or pull (Gmail's
+ * other send-as addresses): read when it changes at the provider, a change here kept in opendesk.
+ */
+export type MailIdentitySync = MailSettingSync | "pull";
 
 /** An account's automatic reply as its provider keeps it. */
 export type MailOutOfOffice = {
@@ -2074,6 +2122,8 @@ export type MailThread = {
   shared: boolean;
   assignees: UserRef[];
   comment_count: number;
+  /** The account's address other than its own the conversation was written to or sent from (an alias); null when none. */
+  to_address?: string | null;
 };
 
 export type MailAttachment = {
@@ -2117,6 +2167,8 @@ export type MailMessage = {
   draft_id?: string | null;
   /** The message of the conversation it answers (its In-Reply-To), when stored. */
   in_reply_to_id?: string | null;
+  /** The account's address (its own or an alias) it was sent from or written to; null when none. */
+  own_address?: string | null;
 };
 
 /** How a message came, read from its source (GET /v1/collab/messages/{id}/details). */
@@ -2150,7 +2202,18 @@ export type MailComment = {
   updated_at: string;
 };
 
-export type MailThreadAccount = { id: string; email: string; name: string; display_name: string; color: string; provider: string; signature_html: string };
+export type MailThreadAccount = {
+  id: string;
+  email: string;
+  name: string;
+  display_name: string;
+  color: string;
+  provider: string;
+  signature_html: string;
+  /** The addresses it sends from, its own first. */
+  identities?: MailIdentity[];
+  default_from?: string;
+};
 
 export type MailThreadDetail = {
   thread: MailThread;
