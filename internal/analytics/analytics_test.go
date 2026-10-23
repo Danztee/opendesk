@@ -206,9 +206,38 @@ func TestPropertiesRejectNegativeCountsAndAmounts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.event, func(t *testing.T) {
-			properties, ok := safeProperties(tt.event, map[string]any{tt.property: tt.value})
-			if !ok || len(properties) != 0 {
+			properties, refused, ok := safeProperties(tt.event, map[string]any{tt.property: tt.value})
+			if !ok || len(properties) != 0 || !reflect.DeepEqual(refused, []string{tt.property}) {
 				t.Fatalf("properties = %#v, event accepted = %t; want empty properties and accepted event", properties, ok)
+			}
+		})
+	}
+}
+
+// role stands in for auth.Role: call sites pass named string types.
+type role string
+
+// TestCallSiteShapesKeepEveryProperty sends what the app's call sites send, with the
+// value types they use, and expects nothing refused.
+func TestCallSiteShapesKeepEveryProperty(t *testing.T) {
+	tests := []struct {
+		event string
+		props map[string]any
+	}{
+		{"user_signed_up", map[string]any{"method": "oidc", "invited": false}},
+		{"user_logged_in", map[string]any{"method": "oidc", "mfa": true}},
+		{"user_logged_in", map[string]any{"method": "passkey", "mfa": true}},
+		{"member_invited", map[string]any{"role": role("agent")}},
+		{"api_key_created", map[string]any{"scope_count": 3, "expires": true}},
+		{"webhook_created", map[string]any{"all_events": false, "event_count": 2}},
+		{"ai_feature_used", map[string]any{"feature": "draft_reply", "own_key": false}},
+		{"subscription_started", map[string]any{"plan": "collab", "interval": "year", "seats": 4}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.event, func(t *testing.T) {
+			properties, refused, ok := safeProperties(tt.event, tt.props)
+			if !ok || len(refused) != 0 || len(properties) != len(tt.props) {
+				t.Fatalf("properties = %#v, refused = %v, accepted = %t", properties, refused, ok)
 			}
 		})
 	}

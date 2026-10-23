@@ -6,6 +6,7 @@ package analytics
 import (
 	"log/slog"
 	"math"
+	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
@@ -48,17 +49,23 @@ func (c *Client) Capture(distinctID, workspaceID, event string, props map[string
 	}
 	distinctID, ok := analyticsID(distinctID)
 	if !ok {
+		c.dropped(event, "distinct_id")
 		return
 	}
 	if workspaceID != "" {
 		workspaceID, ok = canonicalUUID(workspaceID)
 		if !ok {
+			c.dropped(event, "workspace_id")
 			return
 		}
 	}
-	properties, ok := safeProperties(event, props)
+	properties, refused, ok := safeProperties(event, props)
 	if !ok {
+		c.dropped(event, "")
 		return
+	}
+	for _, name := range refused {
+		c.dropped(event, name)
 	}
 	msg := posthog.Capture{DistinctId: distinctID, Event: event, Properties: properties}
 	if workspaceID != "" {
@@ -66,6 +73,14 @@ func (c *Client) Capture(distinctID, workspaceID, event string, props map[string
 	}
 	if err := c.ph.Enqueue(msg); err != nil && c.log != nil {
 		c.log.Debug("posthog enqueue", "err", err)
+	}
+}
+
+// dropped logs what the schema refused, by name only, so a new event or property
+// that was never added to eventSchemas shows up instead of vanishing.
+func (c *Client) dropped(event, field string) {
+	if c.log != nil {
+		c.log.Warn("analytics: not sent", "event", event, "field", field)
 	}
 }
 
@@ -84,11 +99,11 @@ type propertyValidator func(any) (any, bool)
 
 var eventSchemas = map[string]map[string]propertyValidator{
 	"user_signed_up": {
-		"method":  enumProperty("password", "google", "microsoft", "github"),
+		"method":  enumProperty("password", "google", "microsoft", "github", "oidc"),
 		"invited": boolProperty,
 	},
 	"user_logged_in": {
-		"method": enumProperty("password", "google", "microsoft", "github", "passkey"),
+		"method": enumProperty("password", "google", "microsoft", "github", "oidc", "passkey"),
 		"mfa":    boolProperty,
 	},
 	"workspace_created": {},
@@ -141,23 +156,28 @@ var eventSchemas = map[string]map[string]propertyValidator{
 	},
 }
 
-// safeProperties retains only known, flat values for known events.
-func safeProperties(event string, props map[string]any) (posthog.Properties, bool) {
+// safeProperties retains only known, flat values for known events, and names the
+// properties it refused.
+func safeProperties(event string, props map[string]any) (posthog.Properties, []string, bool) {
 	schema, ok := eventSchemas[event]
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 	out := posthog.NewProperties()
+	var refused []string
 	for name, value := range props {
 		validate, ok := schema[name]
 		if !ok {
+			refused = append(refused, name)
 			continue
 		}
 		if safe, ok := validate(value); ok {
 			out.Set(name, safe)
+		} else {
+			refused = append(refused, name)
 		}
 	}
-	return out, true
+	return out, refused, true
 }
 
 func analyticsID(id string) (string, bool) {
@@ -187,11 +207,13 @@ func enumProperty(allowed ...string) propertyValidator {
 		values[value] = struct{}{}
 	}
 	return func(value any) (any, bool) {
-		text, ok := value.(string)
-		if !ok {
+		// Named string types (auth.Role) are strings too.
+		v := reflect.ValueOf(value)
+		if !v.IsValid() || v.Kind() != reflect.String {
 			return nil, false
 		}
-		_, ok = values[text]
+		text := v.String()
+		_, ok := values[text]
 		return text, ok
 	}
 }
