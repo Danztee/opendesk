@@ -543,15 +543,10 @@ func gmailChangesWithPending(changes []gmailChange, pending []string) []gmailCha
 			ordered = append(ordered, c)
 		}
 	}
-	seen := make(map[string]bool, len(pending))
 	// applyGmailChanges takes the newest changes first when its budget is full, so
 	// append the older backlog in reverse to process its oldest entries first.
 	for i := len(pending) - 1; i >= 0; i-- {
 		id := pending[i]
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
 		c, ok := byID[id]
 		if !ok {
 			c = gmailChange{ID: id, Added: true}
@@ -566,19 +561,18 @@ func pendingGmailChanges(previous []string, changes []gmailChange, skipped []str
 	for _, id := range skipped {
 		skippedSet[id] = true
 	}
-	seen := make(map[string]bool, len(skipped))
 	pending := make([]string, 0, len(skipped))
-	appendSkipped := func(id string) {
-		if skippedSet[id] && !seen[id] {
-			seen[id] = true
+	for _, id := range previous {
+		if skippedSet[id] {
 			pending = append(pending, id)
+			delete(skippedSet, id)
 		}
 	}
-	for _, id := range previous {
-		appendSkipped(id)
-	}
 	for _, c := range changes {
-		appendSkipped(c.ID)
+		if skippedSet[c.ID] {
+			pending = append(pending, c.ID)
+			delete(skippedSet, c.ID)
+		}
 	}
 	return pending
 }
