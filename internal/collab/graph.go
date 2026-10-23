@@ -345,8 +345,8 @@ func (s *service) syncGraph(ctx context.Context, p *pass, g *graphProvider) erro
 				"&$filter=" + url.QueryEscape("receivedDateTime ge "+since)
 			st.Initial = true
 		}
-		// The first sync imports at most initialMax messages; any other round at most
-		// that many per folder and pass (the rest comes with later changes).
+		// The first sync imports at most initialMax messages; later passes import at most
+		// that many per folder and retain the current page when the budget is exhausted.
 		limit := initialMax
 		if st.Initial && first {
 			limit = budget

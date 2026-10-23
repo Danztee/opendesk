@@ -24,15 +24,14 @@ type fakeGraph struct {
 	folders []map[string]any
 	msgs    map[string]*graphFakeMsg
 	// pending are the delta changes of each folder since its last delta link.
-	pending      map[string][]map[string]any
-	pageSize     int
-	replayFolder string
-	pages        map[string]map[string]any
-	moves        []string // "id->folder"
-	patches      []string // "id:json"
-	drafts       []string // MIME of created drafts
-	sentIDs      []string
-	nextID       int
+	pending  map[string][]map[string]any
+	pageSize int
+	pages    map[string]map[string]any
+	moves    []string // "id->folder"
+	patches  []string // "id:json"
+	drafts   []string // MIME of created drafts
+	sentIDs  []string
+	nextID   int
 	// settings is the profile name and automatic replies (settings_test.go).
 	settings fakeGraphSettings
 	// cats are the master categories, message categories and deleted drafts (categories_test.go).
@@ -68,6 +67,7 @@ func (g *fakeGraph) item(m *graphFakeMsg) map[string]any {
 func (g *fakeGraph) add(id, conv, folder string, read bool, m testMail) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.resetPages()
 	if m.date.IsZero() {
 		m.date = time.Now().Add(-time.Duration(100-len(g.msgs)) * time.Minute)
 	}
@@ -80,6 +80,7 @@ func (g *fakeGraph) add(id, conv, folder string, read bool, m testMail) {
 func (g *fakeGraph) move(id, folder string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.resetPages()
 	m := g.msgs[id]
 	g.pending[m.folder] = append(g.pending[m.folder], map[string]any{"id": id, "@removed": map[string]string{"reason": "changed"}})
 	m.folder = folder
@@ -89,6 +90,7 @@ func (g *fakeGraph) move(id, folder string) {
 func (g *fakeGraph) remove(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.resetPages()
 	m := g.msgs[id]
 	g.pending[m.folder] = append(g.pending[m.folder], map[string]any{"id": id, "@removed": map[string]string{"reason": "deleted"}})
 	delete(g.msgs, id)
@@ -97,9 +99,16 @@ func (g *fakeGraph) remove(id string) {
 func (g *fakeGraph) markRead(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.resetPages()
 	m := g.msgs[id]
 	m.read = true
 	g.pending[m.folder] = append(g.pending[m.folder], g.item(m))
+}
+
+func (g *fakeGraph) resetPages() {
+	if len(g.pages) > 0 {
+		g.pages = map[string]map[string]any{}
+	}
 }
 
 func (g *fakeGraph) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -134,22 +143,21 @@ func (g *fakeGraph) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		requestURI := r.URL.RequestURI()
-		if page, ok := g.pages[requestURI]; folder == g.replayFolder && ok {
+		if page, ok := g.pages[requestURI]; ok {
 			reply(page)
 			return
 		}
 		list := g.pending[folder]
+		offset, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		end := min(offset+g.pageSize, len(list))
 		var page map[string]any
-		if len(list) > g.pageSize {
-			g.pending[folder] = list[g.pageSize:]
-			page = map[string]any{"value": list[:g.pageSize], "@odata.nextLink": g.srv.URL + "/next/" + folder}
+		if end < len(list) {
+			page = map[string]any{"value": list[offset:end], "@odata.nextLink": g.srv.URL + "/next/" + folder + "?page=" + strconv.Itoa(end)}
 		} else {
 			g.pending[folder] = nil
-			page = map[string]any{"value": list, "@odata.deltaLink": g.srv.URL + "/delta/" + folder}
+			page = map[string]any{"value": list[offset:end], "@odata.deltaLink": g.srv.URL + "/delta/" + folder}
 		}
-		if folder == g.replayFolder {
-			g.pages[requestURI] = page
-		}
+		g.pages[requestURI] = page
 		reply(page)
 	case r.Method == "GET" && len(parts) == 4 && parts[1] == "messages" && parts[3] == "$value":
 		m := g.msgs[parts[2]]
@@ -195,7 +203,6 @@ func TestGraphSyncResumesWhenInitialBudgetIsExhausted(t *testing.T) {
 	w := newWorld(t)
 	g := newFakeGraph(t)
 	g.pageSize = 50
-	g.replayFolder = "f-archive"
 	w.s.graphBase = g.srv.URL
 	a := w.account(w.agent, ProviderMicrosoft, VisibilityShared, Audience{Everyone: true})
 	for i := 0; i < initialMax; i++ {
@@ -220,6 +227,37 @@ func TestGraphSyncResumesWhenInitialBudgetIsExhausted(t *testing.T) {
 	}
 	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1 AND remote_id LIKE 'budget-%'`, a.ID); n != initialMax+1 {
 		t.Fatalf("second sync imported %d messages, want %d", n, initialMax+1)
+	}
+}
+
+func TestGraphSyncResumesWhenDeltaBudgetIsExhausted(t *testing.T) {
+	w := newWorld(t)
+	g := newFakeGraph(t)
+	g.pageSize = 50
+	w.s.graphBase = g.srv.URL
+	a := w.account(w.agent, ProviderMicrosoft, VisibilityShared, Audience{Everyone: true})
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < initialMax+1; i++ {
+		id := "delta-budget-" + strconv.Itoa(i)
+		g.add(id, "delta-budget-conversation", "f-inbox", false, testMail{
+			from: "Frank <frank@example.com>", to: a.Email, subject: "Delta budget", msgID: id + "@example.com", body: id,
+		})
+	}
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1 AND remote_id LIKE 'delta-budget-%'`, a.ID); n != initialMax {
+		t.Fatalf("first delta sync imported %d messages, want %d", n, initialMax)
+	}
+
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1 AND remote_id LIKE 'delta-budget-%'`, a.ID); n != initialMax+1 {
+		t.Fatalf("second delta sync imported %d messages, want %d", n, initialMax+1)
 	}
 }
 
