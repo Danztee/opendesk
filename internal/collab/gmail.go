@@ -257,10 +257,9 @@ type gmailChange struct {
 
 // gmailSyncState keeps a pending history page and changes skipped by the per-pass budget.
 type gmailSyncState struct {
-	HistoryID          string   `json:"history_id"`
-	HistoryPageStartID string   `json:"history_page_start_id,omitempty"`
-	HistoryPageToken   string   `json:"history_page_token,omitempty"`
-	PendingIDs         []string `json:"pending_ids,omitempty"`
+	HistoryID        string   `json:"history_id"`
+	HistoryPageToken string   `json:"history_page_token,omitempty"`
+	PendingIDs       []string `json:"pending_ids,omitempty"`
 }
 
 // errHistoryGone means the stored history id is older than Gmail keeps: sync from scratch.
@@ -474,11 +473,7 @@ func (s *service) syncGmail(ctx context.Context, p *pass, g *gmailProvider) erro
 	var st gmailSyncState
 	_ = json.Unmarshal(p.a.SyncState, &st)
 	if st.HistoryID != "" {
-		since := st.HistoryID
-		if st.HistoryPageToken != "" {
-			since = st.HistoryPageStartID
-		}
-		changes, latest, nextPage, err := g.history(ctx, since, st.HistoryPageToken)
+		changes, latest, nextPage, err := g.history(ctx, st.HistoryID, st.HistoryPageToken)
 		if err == nil {
 			ordered := gmailChangesWithPending(changes, st.PendingIDs)
 			skipped, err := s.applyGmailChanges(ctx, p, g, ordered)
@@ -488,10 +483,8 @@ func (s *service) syncGmail(ctx context.Context, p *pass, g *gmailProvider) erro
 			st.PendingIDs = pendingGmailChanges(st.PendingIDs, changes, skipped)
 			if nextPage == "" {
 				st.HistoryID = latest
-				st.HistoryPageStartID = ""
 				st.HistoryPageToken = ""
 			} else {
-				st.HistoryPageStartID = since
 				st.HistoryPageToken = nextPage
 			}
 			return s.saveAccountState(ctx, p.a, st)

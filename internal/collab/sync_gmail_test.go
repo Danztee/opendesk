@@ -454,7 +454,7 @@ func TestGmailSyncResumesHistoryPagination(t *testing.T) {
 	}
 	var state gmailSyncState
 	if err := json.Unmarshal(w.reload(a).SyncState, &state); err != nil ||
-		state.HistoryID != "100" || state.HistoryPageStartID != "100" || state.HistoryPageToken == "" {
+		state.HistoryID != "100" || state.HistoryPageToken == "" {
 		t.Fatalf("history continuation after first sync: %+v, %v", state, err)
 	}
 
