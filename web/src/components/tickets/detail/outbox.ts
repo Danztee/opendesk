@@ -137,7 +137,7 @@ export function hold(temp: Message, body: SendMessageBody, unsent: Unsent, me: s
   }
   const ms = seconds * 1000;
   const label = body.status
-    ? t("outbox.sendingAndMark", { status: statusLabel[body.status].toLowerCase() })
+    ? t("outbox.sendingAndMark", { status: statusLabel(body.status).toLowerCase() })
     : t("outbox.sending");
   const id = toast.held(label, ms, { label: t("outbox.undo"), onClick: () => undo(temp.id) }, { label: t("outbox.asNote"), onClick: () => asNote(temp.id) });
   held.set(temp.id, { temp, body, unsent, me, origin: currentOrigin(), bytes, timer: setTimeout(() => void release(temp.id), ms), toast: id });

@@ -1,11 +1,17 @@
 // i18n: i18next with one JSON catalog per namespace and language under
-// ./locales/<lng>/<ns>.json. English is bundled; other languages load on demand,
-// so a page only downloads the catalogs it shows.
+// ./locales/<lng>/<ns>.json. English is bundled; another language loads a
+// namespace at a time, when something asks for it: a public page loads the
+// namespaces it shows (setLocale), the agent app loads its catalogs before its
+// first route renders (loadAgentCatalogs, from the root route), and a component
+// reading a namespace that is not there yet loads it (useTranslation). Boot
+// itself loads only `common`, so a help center or CSAT visitor never downloads
+// the agent app's catalogs.
 //
-// The agent app ships English (every string lives in the en catalogs). The
-// customer-facing surfaces (help center, CSAT, widget) ship every SUPPORTED
-// language, picked from the visitor's browser with the workspace default as
-// the fallback (see pickLocale).
+// The agent app ships English and French, following the browser's language. A
+// key without French falls back to English (fallbackLng), so a new English
+// string never shows a raw key. The customer-facing surfaces (help center, CSAT,
+// widget) ship every SUPPORTED language, picked from the visitor's browser with
+// the workspace default as the fallback (see pickLocale).
 
 import i18n, { type BackendModule, type ReadCallback } from "i18next";
 import { initReactI18next } from "react-i18next";
@@ -53,6 +59,11 @@ export function pickLocale(opts: { explicit?: string | null; browser?: readonly 
   return matchLocale(opts.explicit) ?? browser.map(matchLocale).find((x): x is Locale => !!x) ?? matchLocale(opts.workspaceDefault) ?? "en";
 }
 
+/** The agent app is translated into French; every other language gets English. */
+export function pickAgentLocale(browser?: readonly string[]): "en" | "fr" {
+  return pickLocale({ browser }) === "fr" ? "fr" : "en";
+}
+
 const loaders = import.meta.glob<{ default: Record<string, unknown> }>(["./locales/*/*.json", "!./locales/en/*.json"]);
 
 const lazyBackend: BackendModule = {
@@ -72,10 +83,11 @@ void i18n
   .use(lazyBackend)
   .use(initReactI18next)
   .init({
-    lng: "en",
+    lng: pickAgentLocale(),
     fallbackLng: "en",
     supportedLngs: [...SUPPORTED],
-    ns: [...NAMESPACES],
+    // Only what every page reads loads at boot; the rest load on demand (see the top).
+    ns: ["common"],
     defaultNS: "common",
     resources: { en },
     partialBundledLanguages: true,
@@ -84,37 +96,83 @@ void i18n
     react: { useSuspense: false },
   });
 
+const agentLoads = new Map<string, Promise<void>>();
+
+/**
+ * Load the agent app's catalogs in its language, all at once, so its pages and
+ * the strings read outside React (`i18n.t`) render translated from the first
+ * paint. English is bundled. A namespace that fails to load stays English and
+ * is tried again on the next call.
+ */
+export function loadAgentCatalogs(lng: string = pickAgentLocale()): Promise<void> {
+  if (lng === "en") return Promise.resolve();
+  let pending = agentLoads.get(lng);
+  if (!pending) {
+    pending = Promise.allSettled(
+      NAMESPACES.filter((ns) => !i18n.hasResourceBundle(lng, ns) && loaders[`./locales/${lng}/${ns}.json`]).map(async (ns) => {
+        const m = await loaders[`./locales/${lng}/${ns}.json`]();
+        i18n.addResourceBundle(lng, ns, m.default, true, false);
+      }),
+    ).then((results) => {
+      if (results.some((r) => r.status === "rejected")) agentLoads.delete(lng);
+    });
+    agentLoads.set(lng, pending);
+  }
+  return pending;
+}
+
+/** Public routes, which load only the namespaces they show. */
+export function isPublicPath(pathname: string): boolean {
+  return /^\/(help|csat)(\/|$)/.test(pathname);
+}
+
 // The language a customer-facing page chose, so Intl formatting follows the
 // page (an English page for a German browser formats dates in English).
 let pageLocale: string | null = null;
+let localeVersion = 0;
 
 /** Switch language for the page (customer surfaces) and set <html lang dir>. */
 export async function setLocale(lng: Locale, ns: Namespace[] = ["common"]): Promise<void> {
+  const version = ++localeVersion;
   pageLocale = lng;
   await i18n.loadLanguages(lng);
   await i18n.loadNamespaces(ns);
+  if (version !== localeVersion) return;
   await i18n.changeLanguage(lng);
+  if (version !== localeVersion) return;
   if (typeof document !== "undefined") {
     document.documentElement.lang = lng;
     document.documentElement.dir = RTL.has(lng) ? "rtl" : "ltr";
   }
 }
 
-/** Back to the agent app's language (English) when leaving a public page. */
+/** Restore the browser's agent language when leaving a public page. */
 export function resetLocale() {
+  ++localeVersion;
   pageLocale = null;
-  if (i18n.language !== "en") void i18n.changeLanguage("en");
+  const lng = pickAgentLocale();
+  if (i18n.language !== lng) void i18n.changeLanguage(lng);
   if (typeof document !== "undefined") {
-    document.documentElement.lang = "en";
+    document.documentElement.lang = lng;
     document.documentElement.dir = "ltr";
   }
 }
 
-/** The active locale for Intl formatting. Agent app: the browser's locale; public pages: the page language. */
+resetLocale();
+
+/**
+ * The active locale for Intl formatting: the page language on public pages, the
+ * agent app's language in the app. A browser locale of that same language
+ * (matchLocale) wins, so fr-CA or fr-CH keeps its own number and date formats.
+ * An English agent app formats with the browser's locale, whatever its language.
+ */
 export function intlLocale(): string {
-  if (pageLocale) return pageLocale;
-  if (i18n.language && i18n.language !== "en") return i18n.language;
-  return typeof navigator !== "undefined" ? navigator.language || "en" : "en";
+  const nav = typeof navigator !== "undefined" ? navigator : null;
+  const active = pageLocale ?? (i18n.language && i18n.language !== "en" ? i18n.language : null);
+  if (!active) return nav?.language || "en";
+  const browser = nav ? (nav.languages?.length ? nav.languages : [nav.language]) : [];
+  const lng = matchLocale(active);
+  return browser.find((tag) => !!tag && matchLocale(tag) === lng) ?? active;
 }
 
 export { i18n };
