@@ -303,12 +303,21 @@ const graphDeltaSelect = "id,conversationId,isRead,isDraft,parentFolderId,receiv
 
 // folderDeltaState is a folder's place in Graph's delta: the delta link of its last
 // complete round, or the next page of the round in progress (Initial: the round started
-// from nothing, with the 30-day window).
+// from nothing, with the 30-day window; Left: what it may still import).
+//
+// Resume is the first page of a read whose new mail did not fit the pass's budget. The
+// next pass reads the pages from there again for that mail alone, up to Next (or the
+// round's end), before the folder reads on.
 type folderDeltaState struct {
 	Delta   string `json:"delta,omitempty"`
 	Next    string `json:"next,omitempty"`
 	Initial bool   `json:"initial,omitempty"`
+	Left    *int   `json:"left,omitempty"`
+	Resume  string `json:"resume,omitempty"`
 }
+
+// graphClockSlack is how much before the connect mail still counts as new.
+const graphClockSlack = 5 * time.Minute
 
 // graphPagesPerPass bounds the delta pages one pass reads of a folder; a longer round
 // goes on from its saved next page in the next pass.
@@ -325,6 +334,13 @@ func (s *service) syncGraph(ctx context.Context, p *pass, g *graphProvider) erro
 	slices.SortFunc(folders, func(a, b *folderRow) int { return compareFolders(a.remote(), b.remote()) })
 	first := p.a.LastSyncedAt == nil
 	budget := initialMax
+	// Mail received since the connect (and in the last 30 days) is new; a message from
+	// before it that a change only touches (read, flagged, moved) was never imported and
+	// stays out. Graph's times are to the second, its clock is not ours: a few minutes' slack.
+	newSince := time.Now().Add(-initialWindow)
+	if c := p.a.CreatedAt.Add(-graphClockSlack); c.After(newSince) {
+		newSince = c
+	}
 	for _, f := range folders {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -343,15 +359,20 @@ func (s *service) syncGraph(ctx context.Context, p *pass, g *graphProvider) erro
 			since := time.Now().Add(-initialWindow).UTC().Format(time.RFC3339)
 			target = s.graphBase + "/me/mailFolders/" + url.PathEscape(f.RemoteID) + "/messages/delta?$select=" + graphDeltaSelect +
 				"&$filter=" + url.QueryEscape("receivedDateTime ge "+since)
-			st.Initial = true
+			st = folderDeltaState{Initial: true}
 		}
-		// The first sync imports at most initialMax messages; later passes import at most
-		// that many per folder and retain the current page when the budget is exhausted.
+		// An initial round (the first sync, a new folder, one started over) imports at most
+		// initialMax messages, the first sync's shared by all folders, and leaves the rest
+		// out. Any other round imports new mail, at most that many per folder and pass; the
+		// rest comes with the next pass (Resume).
 		limit := initialMax
-		if st.Initial && first {
+		switch {
+		case st.Initial && st.Left != nil:
+			limit = *st.Left
+		case st.Initial && first:
 			limit = budget
 		}
-		used, err := s.graphFolderDelta(ctx, p, g, f, target, st.Initial, limit)
+		used, more, err := s.graphFolderDelta(ctx, p, g, f, st, target, limit, newSince)
 		if isNotFound(err) || isSyncStateGone(err) {
 			// The folder is gone or its delta link expired: start it over next pass.
 			if _, err := s.d.DB.Pool.Exec(ctx, `UPDATE collab_folders SET sync_state = '{}' WHERE id = $1`, f.ID); err != nil {
@@ -363,6 +384,10 @@ func (s *service) syncGraph(ctx context.Context, p *pass, g *graphProvider) erro
 			return err
 		}
 		if st.Initial && first {
+			// A round that goes on next pass keeps what it has left (Left).
+			if more {
+				used = limit
+			}
 			budget = max(budget-used, 0)
 		}
 	}
@@ -378,61 +403,111 @@ func isSyncStateGone(err error) bool {
 	return pe.status == http.StatusGone || strings.Contains(pe.msg, "SyncStateNotFound") || strings.Contains(pe.msg, "resyncRequired")
 }
 
-// graphFolderDelta reads a folder's delta pages from target and stores each with the
-// folder's new place; limit bounds the new messages imported. It returns how many it
-// imported.
-func (s *service) graphFolderDelta(ctx context.Context, p *pass, g *graphProvider, f *folderRow, target string, initial bool, limit int) (int, error) {
-	imported := 0
-	for pages := 0; pages < graphPagesPerPass && target != ""; pages++ {
-		var page struct {
-			Value     []graphMessage `json:"value"`
-			NextLink  string         `json:"@odata.nextLink"`
-			DeltaLink string         `json:"@odata.deltaLink"`
-		}
-		err := s.callJSON(ctx, p.a, "Microsoft", http.MethodGet, target, nil, &page,
-			map[string]string{"Prefer": `IdType="ImmutableId", odata.maxpagesize=50`})
-		if err != nil {
-			return imported, err
-		}
-		next := folderDeltaState{Next: page.NextLink, Initial: initial && page.NextLink != ""}
-		if page.NextLink == "" {
-			next = folderDeltaState{Delta: page.DeltaLink}
-		}
-		n, pending, err := s.applyGraphPage(ctx, p, g, f, target, initial, page.Value, limit-imported, next)
-		if err != nil {
-			return imported, err
-		}
-		imported += n
-		if pending {
-			return imported, nil
-		}
-		if page.NextLink == "" {
-			return imported, nil
-		}
-		target = page.NextLink
-	}
-	return imported, nil
+// graphDeltaPage is one page of a folder's delta.
+type graphDeltaPage struct {
+	Value     []graphMessage `json:"value"`
+	NextLink  string         `json:"@odata.nextLink"`
+	DeltaLink string         `json:"@odata.deltaLink"`
 }
 
-// applyGraphPage stores one delta page of a folder, keeping its current cursor when the
-// import budget leaves new messages on the page for a later pass.
-func (s *service) applyGraphPage(ctx context.Context, p *pass, g *graphProvider, f *folderRow, target string, initial bool, list []graphMessage, left int, place folderDeltaState) (int, bool, error) {
+func (s *service) graphDelta(ctx context.Context, p *pass, link string) (*graphDeltaPage, error) {
+	var page graphDeltaPage
+	err := s.callJSON(ctx, p.a, "Microsoft", http.MethodGet, link, nil, &page,
+		map[string]string{"Prefer": `IdType="ImmutableId", odata.maxpagesize=50`})
+	return &page, err
+}
+
+// graphFolderDelta reads a folder's delta: first the pages again from st.Resume for the
+// new mail they still have, then on from target, storing each page with the folder's new
+// place. limit bounds the new messages imported; newSince tells new mail from older mail
+// a change only touches. It returns how many it imported, and whether the round goes on
+// next pass.
+func (s *service) graphFolderDelta(ctx context.Context, p *pass, g *graphProvider, f *folderRow, st folderDeltaState, target string, limit int, newSince time.Time) (int, bool, error) {
+	imported, pages := 0, 0
+	for at := st.Resume; at != ""; {
+		if pages == graphPagesPerPass {
+			return imported, true, nil // goes on from the saved page next pass
+		}
+		pages++
+		page, err := s.graphDelta(ctx, p, at)
+		if err != nil {
+			return imported, false, err
+		}
+		next := page.NextLink
+		if st.Next != "" && next == st.Next {
+			next = "" // back where the read goes on
+		}
+		n, err := s.applyGraphPage(ctx, p, g, f, page.Value, true, limit-imported, newSince, func(full bool, _ int) folderDeltaState {
+			place := st
+			if place.Resume = next; full {
+				place.Resume = at
+			}
+			return place
+		})
+		if err != nil {
+			return imported, false, err
+		}
+		imported += n
+		if imported >= limit {
+			return imported, true, nil
+		}
+		at = next
+	}
+	initial := st.Initial
+	if initial {
+		newSince = time.Time{} // the round's window is in its link
+	}
+	resume := ""
+	for ; pages < graphPagesPerPass && target != ""; pages++ {
+		page, err := s.graphDelta(ctx, p, target)
+		if err != nil {
+			return imported, false, err
+		}
+		n, err := s.applyGraphPage(ctx, p, g, f, page.Value, false, limit-imported, newSince, func(full bool, n int) folderDeltaState {
+			if full && !initial && resume == "" {
+				resume = target
+			}
+			if page.NextLink == "" {
+				return folderDeltaState{Delta: page.DeltaLink, Resume: resume}
+			}
+			place := folderDeltaState{Next: page.NextLink, Initial: initial, Resume: resume}
+			if initial {
+				left := limit - imported - n
+				place.Left = &left
+			}
+			return place
+		})
+		if err != nil {
+			return imported, false, err
+		}
+		imported += n
+		target = page.NextLink
+	}
+	return imported, target != "", nil
+}
+
+// applyGraphPage stores one delta page of a folder with the folder's place, which place
+// gives from whether new mail did not fit in left and how many were imported. Mail from
+// before newSince that was never imported stays out. Again (a page read once already) it
+// only imports new mail.
+func (s *service) applyGraphPage(ctx context.Context, p *pass, g *graphProvider, f *folderRow, list []graphMessage, again bool, left int,
+	newSince time.Time, place func(full bool, imported int) folderDeltaState) (int, error) {
 	remoteIDs := make([]string, 0, len(list))
 	for _, m := range list {
 		remoteIDs = append(remoteIDs, m.ID)
 	}
 	known, err := p.lookupMany(ctx, s.d.DB.Pool, remoteIDs)
 	if err != nil {
-		return 0, false, err
+		return 0, err
 	}
 	fetched := map[string]*newMessage{}
-	pending := false
+	full := false
 	for _, m := range list {
-		if m.Removed != nil || known[m.ID] != nil {
+		if m.Removed != nil || known[m.ID] != nil || (!m.ReceivedDateTime.IsZero() && m.ReceivedDateTime.Before(newSince)) {
 			continue
 		}
 		if len(fetched) >= left {
-			pending = true
+			full = true
 			continue
 		}
 		raw, err := g.FetchRaw(ctx, MessageRef{RemoteID: m.ID})
@@ -444,16 +519,17 @@ func (s *service) applyGraphPage(ctx context.Context, p *pass, g *graphProvider,
 			continue
 		}
 		if err != nil {
-			return 0, false, err
+			return 0, err
 		}
 		fetched[m.ID] = &newMessage{RemoteID: m.ID, ThreadRemoteID: m.ConversationID, Raw: raw, Date: m.ReceivedDateTime}
 	}
-	if pending {
-		place = folderDeltaState{Next: target, Initial: initial}
-	}
+	at := place(full, len(fetched))
 	err = p.batch(ctx, func(tx pgx.Tx) error {
 		for _, m := range list {
 			stored := known[m.ID]
+			if again && (m.Removed != nil || stored != nil) {
+				continue
+			}
 			if m.Removed != nil {
 				// Moved out of this folder or deleted: it leaves this folder; a message in no
 				// folder at the end of the pass is removed.
@@ -464,6 +540,9 @@ func (s *service) applyGraphPage(ctx context.Context, p *pass, g *graphProvider,
 						return err
 					}
 				}
+				continue
+			}
+			if stored == nil && fetched[m.ID] == nil {
 				continue
 			}
 			folder := f.ID
@@ -482,16 +561,15 @@ func (s *service) applyGraphPage(ctx context.Context, p *pass, g *graphProvider,
 				}
 				continue
 			}
-			if in := fetched[m.ID]; in != nil {
-				in.State = st
-				if _, err := p.insert(ctx, tx, in); err != nil {
-					return err
-				}
+			in := fetched[m.ID]
+			in.State = st
+			if _, err := p.insert(ctx, tx, in); err != nil {
+				return err
 			}
 		}
-		b, _ := json.Marshal(place)
+		b, _ := json.Marshal(at)
 		_, err := tx.Exec(ctx, `UPDATE collab_folders SET sync_state = $2 WHERE id = $1`, f.ID, b)
 		return err
 	})
-	return len(fetched), pending, err
+	return len(fetched), err
 }

@@ -23,10 +23,10 @@ type fakeGraph struct {
 	mu      sync.Mutex
 	folders []map[string]any
 	msgs    map[string]*graphFakeMsg
-	// pending are the delta changes of each folder since its last delta link.
-	pending  map[string][]map[string]any
-	pageSize int
-	pages    map[string]map[string]any
+	// changes are the delta items of each folder, oldest first. A delta or next link is a
+	// place in them, so a link read again answers the same, as Graph's do.
+	changes  map[string][]map[string]any
+	pageSize int      // delta items a page
 	moves    []string // "id->folder"
 	patches  []string // "id:json"
 	drafts   []string // MIME of created drafts
@@ -49,7 +49,7 @@ var graphWell = map[string]string{"inbox": "f-inbox", "sentitems": "f-sent", "dr
 	"junkemail": "f-junk", "archive": "f-archive"}
 
 func newFakeGraph(t *testing.T) *fakeGraph {
-	g := &fakeGraph{t: t, msgs: map[string]*graphFakeMsg{}, pending: map[string][]map[string]any{}, pageSize: 2, pages: map[string]map[string]any{}, folders: []map[string]any{
+	g := &fakeGraph{t: t, msgs: map[string]*graphFakeMsg{}, changes: map[string][]map[string]any{}, pageSize: 2, folders: []map[string]any{
 		{"id": "f-inbox", "displayName": "Inbox", "childFolderCount": 1}, {"id": "f-sent", "displayName": "Sent Items"},
 		{"id": "f-drafts", "displayName": "Drafts"}, {"id": "f-trash", "displayName": "Deleted Items"},
 		{"id": "f-junk", "displayName": "Junk Email"}, {"id": "f-archive", "displayName": "Archive"},
@@ -67,48 +67,38 @@ func (g *fakeGraph) item(m *graphFakeMsg) map[string]any {
 func (g *fakeGraph) add(id, conv, folder string, read bool, m testMail) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.resetPages()
 	if m.date.IsZero() {
 		m.date = time.Now().Add(-time.Duration(100-len(g.msgs)) * time.Minute)
 	}
 	msg := &graphFakeMsg{id: id, conv: conv, folder: folder, read: read, raw: m.raw(), date: m.date}
 	g.msgs[id] = msg
-	g.pending[folder] = append(g.pending[folder], g.item(msg))
+	g.changes[folder] = append(g.changes[folder], g.item(msg))
 }
 
 // move moves a message at the provider (as a phone would).
 func (g *fakeGraph) move(id, folder string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.resetPages()
 	m := g.msgs[id]
-	g.pending[m.folder] = append(g.pending[m.folder], map[string]any{"id": id, "@removed": map[string]string{"reason": "changed"}})
+	g.changes[m.folder] = append(g.changes[m.folder], map[string]any{"id": id, "@removed": map[string]string{"reason": "changed"}})
 	m.folder = folder
-	g.pending[folder] = append(g.pending[folder], g.item(m))
+	g.changes[folder] = append(g.changes[folder], g.item(m))
 }
 
 func (g *fakeGraph) remove(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.resetPages()
 	m := g.msgs[id]
-	g.pending[m.folder] = append(g.pending[m.folder], map[string]any{"id": id, "@removed": map[string]string{"reason": "deleted"}})
+	g.changes[m.folder] = append(g.changes[m.folder], map[string]any{"id": id, "@removed": map[string]string{"reason": "deleted"}})
 	delete(g.msgs, id)
 }
 
 func (g *fakeGraph) markRead(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.resetPages()
 	m := g.msgs[id]
 	m.read = true
-	g.pending[m.folder] = append(g.pending[m.folder], g.item(m))
-}
-
-func (g *fakeGraph) resetPages() {
-	if len(g.pages) > 0 {
-		g.pages = map[string]map[string]any{}
-	}
+	g.changes[m.folder] = append(g.changes[m.folder], g.item(m))
 }
 
 func (g *fakeGraph) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -142,23 +132,25 @@ func (g *fakeGraph) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				g.t.Errorf("first delta without the window: %s", r.URL.RawQuery)
 			}
 		}
-		requestURI := r.URL.RequestURI()
-		if page, ok := g.pages[requestURI]; ok {
-			reply(page)
+		// A round is the changes after since up to upto (where its first page found the end),
+		// in pages; its delta link goes on from upto.
+		q := r.URL.Query()
+		log := g.changes[folder]
+		since, _ := strconv.Atoi(q.Get("since"))
+		upto, offset := len(log), 0
+		if strings.HasPrefix(p, "/next/") {
+			upto, _ = strconv.Atoi(q.Get("upto"))
+			offset, _ = strconv.Atoi(q.Get("page"))
+		}
+		list := log[min(since, upto):upto]
+		offset = min(offset, len(list))
+		end := min(offset+g.pageSize, len(list))
+		if end < len(list) {
+			reply(map[string]any{"value": list[offset:end], "@odata.nextLink": g.srv.URL + "/next/" + folder +
+				"?since=" + strconv.Itoa(since) + "&upto=" + strconv.Itoa(upto) + "&page=" + strconv.Itoa(end)})
 			return
 		}
-		list := g.pending[folder]
-		offset, _ := strconv.Atoi(r.URL.Query().Get("page"))
-		end := min(offset+g.pageSize, len(list))
-		var page map[string]any
-		if end < len(list) {
-			page = map[string]any{"value": list[offset:end], "@odata.nextLink": g.srv.URL + "/next/" + folder + "?page=" + strconv.Itoa(end)}
-		} else {
-			g.pending[folder] = nil
-			page = map[string]any{"value": list[offset:end], "@odata.deltaLink": g.srv.URL + "/delta/" + folder}
-		}
-		g.pages[requestURI] = page
-		reply(page)
+		reply(map[string]any{"value": list[offset:end], "@odata.deltaLink": g.srv.URL + "/delta/" + folder + "?since=" + strconv.Itoa(upto)})
 	case r.Method == "GET" && len(parts) == 4 && parts[1] == "messages" && parts[3] == "$value":
 		m := g.msgs[parts[2]]
 		if m == nil {
@@ -199,34 +191,60 @@ func (g *fakeGraph) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func TestGraphSyncResumesWhenInitialBudgetIsExhausted(t *testing.T) {
+// burst adds n messages to a folder, received at the given time.
+func (g *fakeGraph) burst(prefix, folder string, n int, at time.Time, to string) {
+	for i := 0; i < n; i++ {
+		id := prefix + "-" + strconv.Itoa(i)
+		g.add(id, id, folder, false, testMail{from: "Frank <frank@example.com>", to: to, subject: "Burst",
+			msgID: id + "@example.com", body: id, date: at})
+	}
+}
+
+func TestGraphSyncFirstConnectStaysCapped(t *testing.T) {
 	w := newWorld(t)
 	g := newFakeGraph(t)
 	g.pageSize = 50
 	w.s.graphBase = g.srv.URL
 	a := w.account(w.agent, ProviderMicrosoft, VisibilityShared, Audience{Everyone: true})
-	for i := 0; i < initialMax; i++ {
-		id := "budget-" + strconv.Itoa(i)
-		g.add(id, "budget-conversation", "f-inbox", false, testMail{
-			from: "Frank <frank@example.com>", to: a.Email, subject: "Budget", msgID: id + "@example.com", body: id,
-		})
+	g.burst("budget", "f-inbox", initialMax, time.Now().Add(-48*time.Hour), a.Email)
+	g.burst("budget-archive", "f-archive", 1, time.Now().Add(-48*time.Hour), a.Email)
+	for pass := 1; pass <= 2; pass++ {
+		if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1`, a.ID); n != initialMax {
+			t.Fatalf("pass %d: %d messages, want %d", pass, n, initialMax)
+		}
 	}
-	g.add("budget-archive", "budget-conversation", "f-archive", false, testMail{
-		from: "Frank <frank@example.com>", to: a.Email, subject: "Budget", msgID: "budget-archive@example.com", body: "archive",
-	})
+	var st folderDeltaState
+	_ = json.Unmarshal(w.folderByRemote(a, "f-archive").SyncState, &st)
+	if st.Delta == "" || st.Next != "" || st.Resume != "" {
+		t.Fatalf("archive place after the first sync: %+v", st)
+	}
+}
 
-	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
-		t.Fatal(err)
+func TestGraphSyncFirstConnectCapSpansPasses(t *testing.T) {
+	w := newWorld(t)
+	g := newFakeGraph(t)
+	w.s.graphBase = g.srv.URL
+	a := w.account(w.agent, ProviderMicrosoft, VisibilityShared, Audience{Everyone: true})
+	// Two a page: the inbox's first round is longer than a pass and keeps what it has left
+	// of the budget for the next one; the archive gets none of it.
+	g.burst("inbox", "f-inbox", 2*graphPagesPerPass+50, time.Now().Add(-48*time.Hour), a.Email)
+	g.burst("archive", "f-archive", 150, time.Now().Add(-72*time.Hour), a.Email)
+	all := `SELECT count(*) FROM collab_messages WHERE account_id = $1`
+	for pass, want := range []int{2 * graphPagesPerPass, 2*graphPagesPerPass + 50, 2*graphPagesPerPass + 50} {
+		if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		if n := w.count(all, a.ID); n != want {
+			t.Fatalf("pass %d: %d messages, want %d", pass+1, n, want)
+		}
 	}
-	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1 AND remote_id LIKE 'budget-%'`, a.ID); n != initialMax {
-		t.Fatalf("first sync imported %d messages, want %d", n, initialMax)
-	}
-
-	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
-		t.Fatal(err)
-	}
-	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1 AND remote_id LIKE 'budget-%'`, a.ID); n != initialMax+1 {
-		t.Fatalf("second sync imported %d messages, want %d", n, initialMax+1)
+	var st folderDeltaState
+	_ = json.Unmarshal(w.folderByRemote(a, "f-inbox").SyncState, &st)
+	if st.Delta == "" || st.Resume != "" {
+		t.Fatalf("inbox place after the first sync: %+v", st)
 	}
 }
 
@@ -240,12 +258,7 @@ func TestGraphSyncResumesWhenDeltaBudgetIsExhausted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < initialMax+1; i++ {
-		id := "delta-budget-" + strconv.Itoa(i)
-		g.add(id, "delta-budget-conversation", "f-inbox", false, testMail{
-			from: "Frank <frank@example.com>", to: a.Email, subject: "Delta budget", msgID: id + "@example.com", body: id,
-		})
-	}
+	g.burst("delta-budget", "f-inbox", initialMax+1, time.Now(), a.Email)
 	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -258,6 +271,75 @@ func TestGraphSyncResumesWhenDeltaBudgetIsExhausted(t *testing.T) {
 	}
 	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1 AND remote_id LIKE 'delta-budget-%'`, a.ID); n != initialMax+1 {
 		t.Fatalf("second delta sync imported %d messages, want %d", n, initialMax+1)
+	}
+	var st folderDeltaState
+	_ = json.Unmarshal(w.folderByRemote(a, "f-inbox").SyncState, &st)
+	if st.Delta == "" || st.Resume != "" || st.Next != "" {
+		t.Fatalf("inbox place after the burst: %+v", st)
+	}
+}
+
+func TestGraphSyncTouchedOldMailStaysOut(t *testing.T) {
+	w := newWorld(t)
+	g := newFakeGraph(t)
+	g.pageSize = 50
+	w.s.graphBase = g.srv.URL
+	a := w.account(w.agent, ProviderMicrosoft, VisibilityShared, Audience{Everyone: true})
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Mail from before the connect that was never imported, read in bulk elsewhere: the
+	// delta carries every one of them. Then a new message.
+	g.burst("old", "f-inbox", initialMax, time.Now().Add(-72*time.Hour), a.Email)
+	g.burst("older", "f-inbox", 50, time.Now().Add(-90*24*time.Hour), a.Email)
+	g.burst("new", "f-inbox", 1, time.Now(), a.Email)
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1`, a.ID); n != 1 || w.count(
+		`SELECT count(*) FROM collab_messages WHERE account_id = $1 AND remote_id = 'new-0'`, a.ID) != 1 {
+		t.Fatalf("%d messages imported, want only the new one", n)
+	}
+	var st folderDeltaState
+	_ = json.Unmarshal(w.folderByRemote(a, "f-inbox").SyncState, &st)
+	if st.Delta == "" || st.Resume != "" {
+		t.Fatalf("inbox place: %+v", st)
+	}
+}
+
+func TestGraphSyncBurstKeepsReadingTheFolder(t *testing.T) {
+	w := newWorld(t)
+	g := newFakeGraph(t)
+	g.pageSize = 50
+	w.s.graphBase = g.srv.URL
+	a := w.account(w.agent, ProviderMicrosoft, VisibilityShared, Audience{Everyone: true})
+	g.add("kept", "kept", "f-archive", true, testMail{from: "Frank <frank@example.com>", to: a.Email, subject: "Kept",
+		msgID: "kept@example.com", body: "Kept", date: time.Now().Add(-72 * time.Hour)})
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A burst in the inbox, and pages after the one the budget ends on, a known message
+	// moved there from the archive: the move is read in the same pass, so the message is
+	// never in no folder (and removed).
+	g.burst("burst", "f-inbox", initialMax+2*g.pageSize, time.Now(), a.Email)
+	g.move("kept", "f-inbox")
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	m := w.messageByRemote(a, "kept")
+	if inbox := w.folderByRemote(a, "f-inbox"); !sliceHas(m.FolderIDs, inbox.ID) {
+		t.Fatalf("moved message: %+v", m.FolderIDs)
+	}
+	var st folderDeltaState
+	_ = json.Unmarshal(w.folderByRemote(a, "f-inbox").SyncState, &st)
+	if st.Delta == "" || st.Resume == "" {
+		t.Fatalf("inbox place during the burst: %+v", st)
+	}
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1`, a.ID); n != initialMax+2*g.pageSize+1 {
+		t.Fatalf("%d messages, want %d", n, initialMax+2*g.pageSize+1)
 	}
 }
 
