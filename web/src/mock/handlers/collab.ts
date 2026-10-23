@@ -14,6 +14,7 @@ import type {
   MailFolder,
   MailFolderRole,
   MailMessage,
+  MailMessageDetails,
   MailThread,
   MailThreadAction,
   MailThreadDetail,
@@ -78,6 +79,16 @@ const STORIES: { subject: string; body: string; designed?: boolean; attach?: boo
 
 const designed = (title: string, text: string) =>
   `<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f6f9fc"><tr><td align="center" style="padding:24px"><table width="560" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="border-radius:8px"><tr><td style="padding:28px;font-family:Helvetica,Arial,sans-serif;color:#1f2328"><h2 style="margin:0 0 12px">${escapeHtml(title)}</h2><p style="margin:0 0 16px;line-height:1.5">${escapeHtml(text).replace(/\n/g, "<br>")}</p><img src="https://images.example.com/track.gif" width="1" height="1" alt=""><p style="margin:0;color:#6a737d;font-size:12px">You are receiving this because you have an account.</p></td></tr></table></td></tr></table>`;
+
+type Quoted = { html: string; text: string; at: string; from: MailAddress };
+const attribution = (q: Quoted) => {
+  const d = new Date(q.at);
+  const day = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase();
+  return `On ${day} at ${time}, ${q.from.name || q.from.email} <${q.from.email}> wrote:`;
+};
+const quoteOf = (q: Quoted) =>
+  `<br><div class="gmail_quote gmail_quote_container"><div dir="ltr" class="gmail_attr">${escapeHtml(attribution(q))}<br></div><blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">${q.html}</blockquote></div>`;
 
 const fileSvg = (label: string) =>
   `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="640" height="400" fill="#eef2f7"/><text x="32" y="210" font-family="Helvetica" font-size="28" fill="#5b6472">${label}</text></svg>`)}`;
@@ -218,11 +229,17 @@ function seedState(ws: WsData): State {
     const start = now - (i * 5 + r() * 4) * HOUR - (i > 8 ? i * DAY * 0.4 : 0);
     const place = i % 9 === 7 ? "spam" : i % 11 === 10 ? "trash" : i % 5 === 4 ? "archive" : "inbox";
     const labels = a.provider === "google" && r() < 0.4 ? [pickR(userFolders(a.id)).id] : [];
+    let prev: Quoted | null = null;
     for (let k = 0; k < n; k++) {
       const fromUs = k % 2 === 1;
       const at = new Date(Math.min(start + k * 3 * HOUR, now - (n - k) * 7 * MIN)).toISOString();
-      const text = fromUs ? `Thanks, ${person.name.split(" ")[0]}. I'll get back to you shortly.\n\n${a.display_name}` : story.body;
-      const html = story.designed && !fromUs ? designed(story.subject, text) : `<p>${escapeHtml(text).replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")}</p>`;
+      const own = fromUs ? `Thanks, ${person.name.split(" ")[0]}. I'll get back to you shortly.\n\n${a.display_name}` : story.body;
+      const ownHtml = story.designed && !fromUs ? designed(story.subject, own) : `<p>${escapeHtml(own).replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")}</p>`;
+      // A reply carries the mail before it, quoted the way Gmail does.
+      const html: string = prev ? `${ownHtml}${quoteOf(prev)}` : ownHtml;
+      const text: string = prev ? `${own}\n\n${attribution(prev)}\n${prev.text.replace(/^/gm, "> ")}` : own;
+      const from = fromUs ? { name: a.display_name, email: a.email } : person;
+      prev = { html, text, at, from };
       const attachments: MailAttachment[] =
         story.attach && !fromUs && k === 0
           ? [
@@ -236,13 +253,13 @@ function seedState(ws: WsData): State {
         thread_id: id,
         account_id: a.id,
         message_id: `${uuid()}@mail.example.com`,
-        from: fromUs ? { name: a.display_name, email: a.email } : person,
+        from,
         to: fromUs ? [person] : [{ name: a.display_name, email: a.email }],
         cc: !fromUs && k === 0 && r() < 0.3 ? [pickR(PEOPLE)] : [],
         bcc: [],
         reply_to: [],
         subject: k === 0 ? story.subject : `Re: ${story.subject}`,
-        snippet: text.replace(/\s+/g, " ").slice(0, 140),
+        snippet: own.replace(/\s+/g, " ").slice(0, 140),
         body_html: html,
         body_text: text,
         sent_at: at,
@@ -331,6 +348,73 @@ function seedState(ws: WsData): State {
       folder_ids: [roleId(work.id, "drafts")],
       attachments: [],
       sent_by: userRef(me),
+    });
+  }
+
+  // A follow-up that quotes the one before it under its signature, as most mail clients send it.
+  {
+    const tid = uuid();
+    const subject = "Your application to Fieldway";
+    const from = { name: "Jade Morrow", email: "jade@fieldway.io" };
+    const sig = `<div>Jade Morrow<br><b>Growth @ Fieldway</b><br>28 W 23rd St, New York, NY 10010</div><br><div>Not the right time for Fieldway? Reply and I'll stop reaching out.</div><br><br><br>`;
+    const first = { text: "Matthew,\n\nHaven't heard from you, are you still interested in Fieldway?\n\nFeel free to reply with a simple yes or no.\n\nBest,\nJade", at: new Date(now - 4 * DAY).toISOString(), from };
+    const second = "Hi Matthew,\n\nI was curious to ask: what's holding you back from completing your application? It looks like you started it a few days ago but haven't submitted it yet.\n\nIf you have any questions, send me a quick note. Happy to answer by email or jump on a quick call.\n\nBest,\nJade";
+    const html = (text: string) => `<div dir="ltr">${text.split("\n\n").map((p) => `<div>${escapeHtml(p).replace(/\n/g, "<br>")}</div><div><br></div>`).join("")}${sig}</div>`;
+    threads.set(tid, { id: tid, account_id: work.id, subject, shares: emptyAudience(), assignees: [], comments: [] });
+    const msg = (text: string, body_html: string, at: string, unread: boolean, sub: string): MailMessage => ({
+      id: uuid(),
+      thread_id: tid,
+      account_id: work.id,
+      message_id: `${uuid()}@fieldway.io`,
+      from,
+      to: [{ name: work.display_name, email: work.email }],
+      cc: [],
+      bcc: [],
+      reply_to: [],
+      subject: sub,
+      snippet: text.replace(/\s+/g, " ").slice(0, 140),
+      body_html,
+      body_text: text,
+      sent_at: at,
+      unread,
+      starred: false,
+      draft: false,
+      folder_ids: [roleId(work.id, "inbox")],
+      attachments: [],
+      sent_by: null,
+    });
+    const firstHtml = html(first.text);
+    messages.push(msg(first.text, firstHtml, first.at, false, subject));
+    messages.push(msg(second, `${html(second)}${quoteOf({ ...first, html: firstHtml })}`, new Date(now - 12 * MIN).toISOString(), true, `Re: ${subject}`));
+  }
+
+  // Mail that only claims to be from PayPal: it fails DMARC, so it carries a warning.
+  {
+    const tid = uuid();
+    const subject = "Your account access has been limited";
+    const text = "We noticed unusual activity on your account. To restore access, confirm your details within 24 hours.\n\nConfirm your account: https://paypal-review.example/confirm\n\nPayPal Security";
+    threads.set(tid, { id: tid, account_id: work.id, subject, shares: emptyAudience(), assignees: [], comments: [] });
+    messages.push({
+      id: uuid(),
+      thread_id: tid,
+      account_id: work.id,
+      message_id: `${uuid()}@mail-relay.top`,
+      from: { name: "PayPal", email: "service@paypal.com" },
+      to: [{ name: work.display_name, email: work.email }],
+      cc: [],
+      bcc: [],
+      reply_to: [{ name: "", email: "support-desk@mail-relay.top" }],
+      subject,
+      snippet: text.replace(/\s+/g, " ").slice(0, 140),
+      body_html: `<p>${escapeHtml(text).replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")}</p>`,
+      body_text: text,
+      sent_at: new Date(now - 95 * MIN).toISOString(),
+      unread: true,
+      starred: false,
+      draft: false,
+      folder_ids: [roleId(work.id, "inbox")],
+      attachments: [],
+      sent_by: null,
     });
   }
 
@@ -957,6 +1041,16 @@ export function registerCollab() {
     return detailOut(ctx.ws, threadOr404(ctx.ws, ctx.params.id));
   });
 
+  get("/v1/collab/messages/:id/details", (ctx) => {
+    requireCollab(ctx.ws);
+    const s = state(ctx.ws);
+    const m = s.messages.find((x) => x.id === ctx.params.id);
+    if (!m) throw notFound("Message");
+    const t = threadOr404(ctx.ws, m.thread_id);
+    const a = s.accounts.find((x) => x.id === t.account_id)!;
+    return messageDetails(m, a.provider, m.sent_by !== null || m.from.email === a.email);
+  });
+
   post("/v1/collab/threads/actions", (ctx) => {
     requireCollab(ctx.ws);
     requireAct(ctx.ws);
@@ -1242,4 +1336,51 @@ export function registerCollab() {
     state(ctx.ws).prefs[db.meId] = p;
     return p;
   });
+}
+
+// How the mock's mail came: senders on their own domain pass every check; a few come
+// through a mailing service ("via"), and the PayPal look-alike fails DMARC.
+const MOCK_SOURCES: Record<string, Partial<MailMessageDetails>> = {
+  "service@paypal.com": { mailed_by: "mail-relay.top", signed_by: [], via: "mail-relay.top", spf: "softfail", dkim: "none", dmarc: "fail", encryption: "none", warning: "spoofed" },
+  "newsletter@webdrop.dev": { mailed_by: "mg.mailgun.org", signed_by: ["mailgun.org"], via: "mailgun.org" },
+};
+
+function messageDetails(m: MailMessage, provider: string, fromAccount: boolean): MailMessageDetails {
+  const domain = m.from.email.split("@")[1] ?? "";
+  const date = new Date(m.sent_at).toUTCString().replace("GMT", "+0000");
+  const addr = (xs: MailAddress[]) => xs.map((x) => (x.name ? `${x.name} <${x.email}>` : x.email)).join(", ");
+  const base: [string, string][] = [
+    ["From", addr([m.from])],
+    ["To", addr(m.to)],
+    ...(m.cc.length ? [["Cc", addr(m.cc)] as [string, string]] : []),
+    ...(m.reply_to.length ? [["Reply-To", addr(m.reply_to)] as [string, string]] : []),
+    ["Subject", m.subject],
+    ["Date", date],
+    ["Message-ID", `<${m.message_id}>`],
+    ["MIME-Version", "1.0"],
+    ["Content-Type", 'multipart/alternative; boundary="000000000000a1b2c3"'],
+  ];
+  if (fromAccount) {
+    const headers = [...base, ...(m.bcc.length ? [["Bcc", addr(m.bcc)] as [string, string]] : [])];
+    return { mailed_by: "", signed_by: [], via: "", spf: "", dkim: "", dmarc: "", encryption: "", warning: "", headers: headers.map(([name, value]) => ({ name, value })) };
+  }
+  const d: MailMessageDetails = { mailed_by: domain, signed_by: [domain], via: "", spf: "pass", dkim: "pass", dmarc: "pass", encryption: "tls", warning: "", headers: [], ...MOCK_SOURCES[m.from.email] };
+  const mx = provider === "google" ? "mx.google.com" : provider === "microsoft" ? "outlook.office365.com" : "mx.margin.app";
+  const signer = d.signed_by[0];
+  const results = [
+    signer ? `dkim=pass header.i=@${signer} header.s=s1 header.b=Xk3pQa9z` : "dkim=none (no signature)",
+    `spf=${d.spf} (${mx}: domain of bounce@${d.mailed_by} ${d.spf === "pass" ? "designates 203.0.113.24 as permitted sender" : "does not designate 198.51.100.7 as permitted sender"}) smtp.mailfrom=bounce@${d.mailed_by}`,
+    `dmarc=${d.dmarc} (p=${d.dmarc === "fail" ? "REJECT" : "NONE"} sp=NONE dis=${d.dmarc === "fail" ? "QUARANTINE" : "NONE"}) header.from=${domain}`,
+  ];
+  const sending = d.encryption === "tls" ? "with ESMTPS id 5b1f17b1804b1-43a8f" : "with ESMTP id 9c2a64e1f0a3d-12be4";
+  d.headers = [
+    { name: "Delivered-To", value: m.to[0]?.email ?? "" },
+    { name: "Received", value: `by 2002:a05:7300:5b8e:b0:1a4 with SMTP id k14csp; ${date}` },
+    { name: "Authentication-Results", value: `${mx}; ${results.join("; ")}` },
+    { name: "Return-Path", value: `<bounce@${d.mailed_by}>` },
+    { name: "Received", value: `from mta-24.${d.mailed_by} (mta-24.${d.mailed_by}. [203.0.113.24]) by ${mx} ${sending} for <${m.to[0]?.email ?? ""}>; ${date}` },
+    ...(signer ? [{ name: "DKIM-Signature", value: `v=1; a=rsa-sha256; c=relaxed/relaxed; d=${signer}; s=s1; h=from:to:subject:date:message-id; bh=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=; b=Xk3pQa9z` }] : []),
+    ...base.map(([name, value]) => ({ name, value })),
+  ];
+  return d;
 }
