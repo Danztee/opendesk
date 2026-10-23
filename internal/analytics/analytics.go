@@ -96,15 +96,15 @@ var eventSchemas = map[string]map[string]propertyValidator{
 		"role": enumProperty("admin", "agent", "viewer"),
 	},
 	"api_key_created": {
-		"scope_count": countProperty(20),
+		"scope_count": nonNegativeCountProperty,
 		"expires":     boolProperty,
 	},
 	"ai_client_connected": {
-		"scope_count": countProperty(100),
+		"scope_count": nonNegativeCountProperty,
 	},
 	"webhook_created": {
 		"all_events":  boolProperty,
-		"event_count": countProperty(100),
+		"event_count": nonNegativeCountProperty,
 	},
 	"plan_limit_hit": {
 		"resource": enumProperty("mailboxes", "members"),
@@ -124,37 +124,31 @@ var eventSchemas = map[string]map[string]propertyValidator{
 		"from":     enumProperty("pro", "collab"),
 		"to":       enumProperty("pro", "collab"),
 		"interval": enumProperty("month", "year"),
-		"seats":    countProperty(100_000),
+		"seats":    nonNegativeCountProperty,
 	},
 	"subscription_started": {
 		"plan":     enumProperty("pro", "collab"),
 		"interval": enumProperty("month", "year"),
-		"seats":    countProperty(100_000),
+		"seats":    nonNegativeCountProperty,
 	},
 	"subscription_canceled": {
 		"status":   enumProperty("trialing", "active", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "paused"),
 		"interval": enumProperty("month", "year"),
-		"seats":    countProperty(100_000),
+		"seats":    nonNegativeCountProperty,
 	},
 	"$exception": {
 		"$exception_type": enumProperty("server_error"),
 	},
 }
 
-// safeProperties bounds work and retains only known, flat values for known events.
+// safeProperties retains only known, flat values for known events.
 func safeProperties(event string, props map[string]any) (posthog.Properties, bool) {
-	if len(event) > 64 || len(props) > 16 {
-		return nil, false
-	}
 	schema, ok := eventSchemas[event]
 	if !ok {
 		return nil, false
 	}
 	out := posthog.NewProperties()
 	for name, value := range props {
-		if len(name) > 64 {
-			continue
-		}
 		validate, ok := schema[name]
 		if !ok {
 			continue
@@ -167,9 +161,6 @@ func safeProperties(event string, props map[string]any) (posthog.Properties, boo
 }
 
 func analyticsID(id string) (string, bool) {
-	if len(id) > 64 {
-		return "", false
-	}
 	prefix := ""
 	if strings.HasPrefix(id, "workspace:") {
 		prefix = "workspace:"
@@ -210,16 +201,14 @@ func boolProperty(value any) (any, bool) {
 	return boolean, ok
 }
 
-func countProperty(max int) propertyValidator {
-	return func(value any) (any, bool) {
-		count, ok := value.(int)
-		return count, ok && count >= 0 && count <= max
-	}
+func nonNegativeCountProperty(value any) (any, bool) {
+	count, ok := value.(int)
+	return count, ok && count >= 0
 }
 
 func amountProperty(value any) (any, bool) {
 	amount, ok := value.(float64)
-	if !ok || math.IsNaN(amount) || math.IsInf(amount, 0) || amount < 0 || amount > 100_000 {
+	if !ok || math.IsNaN(amount) || math.IsInf(amount, 0) || amount < 0 {
 		return nil, false
 	}
 	return amount, true

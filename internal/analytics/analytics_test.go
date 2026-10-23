@@ -38,20 +38,72 @@ func TestCaptureAllowsKnownEvents(t *testing.T) {
 		properties map[string]any
 		want       posthog.Properties
 	}{
-		{name: "signup", event: "user_signed_up", properties: map[string]any{"method": "google", "invited": false}, want: posthog.Properties{"method": "google", "invited": false}},
-		{name: "login", event: "user_logged_in", properties: map[string]any{"method": "passkey", "mfa": true}, want: posthog.Properties{"method": "passkey", "mfa": true}},
+		{
+			name: "signup", event: "user_signed_up",
+			properties: map[string]any{"method": "google", "invited": false},
+			want:       posthog.Properties{"method": "google", "invited": false},
+		},
+		{
+			name: "login", event: "user_logged_in",
+			properties: map[string]any{"method": "passkey", "mfa": true},
+			want:       posthog.Properties{"method": "passkey", "mfa": true},
+		},
 		{name: "workspace", event: "workspace_created", want: posthog.Properties{}},
-		{name: "invitation", event: "member_invited", properties: map[string]any{"role": "agent"}, want: posthog.Properties{"role": "agent"}},
-		{name: "api key", event: "api_key_created", properties: map[string]any{"scope_count": 3, "expires": true}, want: posthog.Properties{"scope_count": 3, "expires": true}},
-		{name: "MCP client", event: "ai_client_connected", properties: map[string]any{"scope_count": 7}, want: posthog.Properties{"scope_count": 7}},
-		{name: "webhook", event: "webhook_created", properties: map[string]any{"all_events": false, "event_count": 2}, want: posthog.Properties{"all_events": false, "event_count": 2}},
-		{name: "plan limit", event: "plan_limit_hit", properties: map[string]any{"resource": "members"}, want: posthog.Properties{"resource": "members"}},
-		{name: "AI feature", event: "ai_feature_used", properties: map[string]any{"feature": "summarize", "own_key": true}, want: posthog.Properties{"feature": "summarize", "own_key": true}},
-		{name: "top up", event: "ai_top_up_purchased", properties: map[string]any{"usd": 10.0}, want: posthog.Properties{"usd": 10.0}},
-		{name: "recharge", event: "ai_recharged", properties: map[string]any{"usd": 2.5}, want: posthog.Properties{"usd": 2.5}},
-		{name: "plan change", event: "subscription_plan_changed", properties: map[string]any{"from": "pro", "to": "collab", "interval": "year", "seats": 4}, want: posthog.Properties{"from": "pro", "to": "collab", "interval": "year", "seats": 4}},
-		{name: "subscription start", event: "subscription_started", properties: map[string]any{"plan": "pro", "interval": "month", "seats": 2}, want: posthog.Properties{"plan": "pro", "interval": "month", "seats": 2}},
-		{name: "subscription cancel", event: "subscription_canceled", properties: map[string]any{"status": "canceled", "interval": "year", "seats": 2}, want: posthog.Properties{"status": "canceled", "interval": "year", "seats": 2}},
+		{
+			name: "invitation", event: "member_invited",
+			properties: map[string]any{"role": "agent"},
+			want:       posthog.Properties{"role": "agent"},
+		},
+		{
+			name: "api key", event: "api_key_created",
+			properties: map[string]any{"scope_count": 3, "expires": true},
+			want:       posthog.Properties{"scope_count": 3, "expires": true},
+		},
+		{
+			name: "MCP client", event: "ai_client_connected",
+			properties: map[string]any{"scope_count": 7},
+			want:       posthog.Properties{"scope_count": 7},
+		},
+		{
+			name: "webhook", event: "webhook_created",
+			properties: map[string]any{"all_events": false, "event_count": 2},
+			want:       posthog.Properties{"all_events": false, "event_count": 2},
+		},
+		{
+			name: "plan limit", event: "plan_limit_hit",
+			properties: map[string]any{"resource": "members"},
+			want:       posthog.Properties{"resource": "members"},
+		},
+		{
+			name: "AI feature", event: "ai_feature_used",
+			properties: map[string]any{"feature": "summarize", "own_key": true},
+			want:       posthog.Properties{"feature": "summarize", "own_key": true},
+		},
+		{
+			name: "top up", event: "ai_top_up_purchased",
+			properties: map[string]any{"usd": 10.0},
+			want:       posthog.Properties{"usd": 10.0},
+		},
+		{
+			name: "recharge", event: "ai_recharged",
+			properties: map[string]any{"usd": 2.5},
+			want:       posthog.Properties{"usd": 2.5},
+		},
+		{
+			name: "plan change", event: "subscription_plan_changed",
+			properties: map[string]any{"from": "pro", "to": "collab", "interval": "year", "seats": 4},
+			want:       posthog.Properties{"from": "pro", "to": "collab", "interval": "year", "seats": 4},
+		},
+		{
+			name: "subscription start", event: "subscription_started",
+			properties: map[string]any{"plan": "pro", "interval": "month", "seats": 2},
+			want:       posthog.Properties{"plan": "pro", "interval": "month", "seats": 2},
+		},
+		{
+			name: "subscription cancel", event: "subscription_canceled",
+			properties: map[string]any{"status": "canceled", "interval": "year", "seats": 2},
+			want:       posthog.Properties{"status": "canceled", "interval": "year", "seats": 2},
+		},
 	}
 
 	for _, tt := range tests {
@@ -124,7 +176,7 @@ func TestCaptureAcceptsWorkspaceDistinctID(t *testing.T) {
 	}
 }
 
-func TestCaptureValidatesIdentifiersAndBoundsProperties(t *testing.T) {
+func TestCaptureValidatesIdentifiersAndFiltersUnknownProperties(t *testing.T) {
 	client, sink := testClient()
 	client.Capture("person@example.com", testWorkspaceID, "user_logged_in", map[string]any{"method": "password"})
 	client.Capture(testDistinctID, "person@example.com", "user_logged_in", map[string]any{"method": "password"})
@@ -135,8 +187,34 @@ func TestCaptureValidatesIdentifiersAndBoundsProperties(t *testing.T) {
 		props["extra"+string(rune('a'+i))] = true
 	}
 	client.Capture(testDistinctID, testWorkspaceID, "user_logged_in", props)
-	if len(sink.messages) != 0 {
-		t.Fatalf("queued %d messages with invalid identifiers, events or oversized properties, want 0", len(sink.messages))
+	if len(sink.messages) != 1 {
+		t.Fatalf("queued %d messages, want only the event with valid identifiers", len(sink.messages))
+	}
+	capture, ok := sink.messages[0].(posthog.Capture)
+	if !ok {
+		t.Fatalf("queued message has type %T, want posthog.Capture", sink.messages[0])
+	}
+	if want := (posthog.Properties{"method": "password", "mfa": true}); !reflect.DeepEqual(capture.Properties, want) {
+		t.Fatalf("properties = %#v, want %#v", capture.Properties, want)
+	}
+}
+
+func TestPropertiesRejectNegativeCountsAndAmounts(t *testing.T) {
+	tests := []struct {
+		event    string
+		property string
+		value    any
+	}{
+		{event: "api_key_created", property: "scope_count", value: -1},
+		{event: "ai_top_up_purchased", property: "usd", value: -1.0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.event, func(t *testing.T) {
+			properties, ok := safeProperties(tt.event, map[string]any{tt.property: tt.value})
+			if !ok || len(properties) != 0 {
+				t.Fatalf("properties = %#v, event accepted = %t; want empty properties and accepted event", properties, ok)
+			}
+		})
 	}
 }
 
