@@ -24,12 +24,15 @@ type fakeGraph struct {
 	folders []map[string]any
 	msgs    map[string]*graphFakeMsg
 	// pending are the delta changes of each folder since its last delta link.
-	pending map[string][]map[string]any
-	moves   []string // "id->folder"
-	patches []string // "id:json"
-	drafts  []string // MIME of created drafts
-	sentIDs []string
-	nextID  int
+	pending      map[string][]map[string]any
+	pageSize     int
+	replayFolder string
+	pages        map[string]map[string]any
+	moves        []string // "id->folder"
+	patches      []string // "id:json"
+	drafts       []string // MIME of created drafts
+	sentIDs      []string
+	nextID       int
 	// settings is the profile name and automatic replies (settings_test.go).
 	settings fakeGraphSettings
 	// cats are the master categories, message categories and deleted drafts (categories_test.go).
@@ -47,7 +50,7 @@ var graphWell = map[string]string{"inbox": "f-inbox", "sentitems": "f-sent", "dr
 	"junkemail": "f-junk", "archive": "f-archive"}
 
 func newFakeGraph(t *testing.T) *fakeGraph {
-	g := &fakeGraph{t: t, msgs: map[string]*graphFakeMsg{}, pending: map[string][]map[string]any{}, folders: []map[string]any{
+	g := &fakeGraph{t: t, msgs: map[string]*graphFakeMsg{}, pending: map[string][]map[string]any{}, pageSize: 2, pages: map[string]map[string]any{}, folders: []map[string]any{
 		{"id": "f-inbox", "displayName": "Inbox", "childFolderCount": 1}, {"id": "f-sent", "displayName": "Sent Items"},
 		{"id": "f-drafts", "displayName": "Drafts"}, {"id": "f-trash", "displayName": "Deleted Items"},
 		{"id": "f-junk", "displayName": "Junk Email"}, {"id": "f-archive", "displayName": "Archive"},
@@ -130,15 +133,24 @@ func (g *fakeGraph) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				g.t.Errorf("first delta without the window: %s", r.URL.RawQuery)
 			}
 		}
-		list := g.pending[folder]
-		if len(list) > 2 {
-			// Two per page.
-			g.pending[folder] = list[2:]
-			reply(map[string]any{"value": list[:2], "@odata.nextLink": g.srv.URL + "/next/" + folder})
+		requestURI := r.URL.RequestURI()
+		if page, ok := g.pages[requestURI]; folder == g.replayFolder && ok {
+			reply(page)
 			return
 		}
-		g.pending[folder] = nil
-		reply(map[string]any{"value": list, "@odata.deltaLink": g.srv.URL + "/delta/" + folder})
+		list := g.pending[folder]
+		var page map[string]any
+		if len(list) > g.pageSize {
+			g.pending[folder] = list[g.pageSize:]
+			page = map[string]any{"value": list[:g.pageSize], "@odata.nextLink": g.srv.URL + "/next/" + folder}
+		} else {
+			g.pending[folder] = nil
+			page = map[string]any{"value": list, "@odata.deltaLink": g.srv.URL + "/delta/" + folder}
+		}
+		if folder == g.replayFolder {
+			g.pages[requestURI] = page
+		}
+		reply(page)
 	case r.Method == "GET" && len(parts) == 4 && parts[1] == "messages" && parts[3] == "$value":
 		m := g.msgs[parts[2]]
 		if m == nil {
@@ -176,6 +188,38 @@ func (g *fakeGraph) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		g.t.Errorf("unexpected Graph call %s %s", r.Method, r.URL.String())
 		w.WriteHeader(400)
+	}
+}
+
+func TestGraphSyncResumesWhenInitialBudgetIsExhausted(t *testing.T) {
+	w := newWorld(t)
+	g := newFakeGraph(t)
+	g.pageSize = 50
+	g.replayFolder = "f-archive"
+	w.s.graphBase = g.srv.URL
+	a := w.account(w.agent, ProviderMicrosoft, VisibilityShared, Audience{Everyone: true})
+	for i := 0; i < initialMax; i++ {
+		id := "budget-" + strconv.Itoa(i)
+		g.add(id, "budget-conversation", "f-inbox", false, testMail{
+			from: "Frank <frank@example.com>", to: a.Email, subject: "Budget", msgID: id + "@example.com", body: id,
+		})
+	}
+	g.add("budget-archive", "budget-conversation", "f-archive", false, testMail{
+		from: "Frank <frank@example.com>", to: a.Email, subject: "Budget", msgID: "budget-archive@example.com", body: "archive",
+	})
+
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1 AND remote_id LIKE 'budget-%'`, a.ID); n != initialMax {
+		t.Fatalf("first sync imported %d messages, want %d", n, initialMax)
+	}
+
+	if err := w.s.syncAccount(w.ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := w.count(`SELECT count(*) FROM collab_messages WHERE account_id = $1 AND remote_id LIKE 'budget-%'`, a.ID); n != initialMax+1 {
+		t.Fatalf("second sync imported %d messages, want %d", n, initialMax+1)
 	}
 }
 

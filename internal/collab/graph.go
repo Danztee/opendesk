@@ -398,11 +398,14 @@ func (s *service) graphFolderDelta(ctx context.Context, p *pass, g *graphProvide
 		if page.NextLink == "" {
 			next = folderDeltaState{Delta: page.DeltaLink}
 		}
-		n, err := s.applyGraphPage(ctx, p, g, f, page.Value, limit-imported, next)
+		n, pending, err := s.applyGraphPage(ctx, p, g, f, target, initial, page.Value, limit-imported, next)
 		if err != nil {
 			return imported, err
 		}
 		imported += n
+		if pending {
+			return imported, nil
+		}
 		if page.NextLink == "" {
 			return imported, nil
 		}
@@ -411,19 +414,25 @@ func (s *service) graphFolderDelta(ctx context.Context, p *pass, g *graphProvide
 	return imported, nil
 }
 
-// applyGraphPage stores one delta page of a folder.
-func (s *service) applyGraphPage(ctx context.Context, p *pass, g *graphProvider, f *folderRow, list []graphMessage, left int, place folderDeltaState) (int, error) {
+// applyGraphPage stores one delta page of a folder, keeping its current cursor when the
+// import budget leaves new messages on the page for a later pass.
+func (s *service) applyGraphPage(ctx context.Context, p *pass, g *graphProvider, f *folderRow, target string, initial bool, list []graphMessage, left int, place folderDeltaState) (int, bool, error) {
 	remoteIDs := make([]string, 0, len(list))
 	for _, m := range list {
 		remoteIDs = append(remoteIDs, m.ID)
 	}
 	known, err := p.lookupMany(ctx, s.d.DB.Pool, remoteIDs)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	fetched := map[string]*newMessage{}
+	pending := false
 	for _, m := range list {
-		if m.Removed != nil || known[m.ID] != nil || len(fetched) >= left {
+		if m.Removed != nil || known[m.ID] != nil {
+			continue
+		}
+		if len(fetched) >= left {
+			pending = true
 			continue
 		}
 		raw, err := g.FetchRaw(ctx, MessageRef{RemoteID: m.ID})
@@ -435,9 +444,12 @@ func (s *service) applyGraphPage(ctx context.Context, p *pass, g *graphProvider,
 			continue
 		}
 		if err != nil {
-			return 0, err
+			return 0, false, err
 		}
 		fetched[m.ID] = &newMessage{RemoteID: m.ID, ThreadRemoteID: m.ConversationID, Raw: raw, Date: m.ReceivedDateTime}
+	}
+	if pending {
+		place = folderDeltaState{Next: target, Initial: initial}
 	}
 	err = p.batch(ctx, func(tx pgx.Tx) error {
 		for _, m := range list {
@@ -481,5 +493,5 @@ func (s *service) applyGraphPage(ctx context.Context, p *pass, g *graphProvider,
 		_, err := tx.Exec(ctx, `UPDATE collab_folders SET sync_state = $2 WHERE id = $1`, f.ID, b)
 		return err
 	})
-	return len(fetched), err
+	return len(fetched), pending, err
 }
