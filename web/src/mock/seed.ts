@@ -257,6 +257,7 @@ function seedUsers() {
       avatar_source: p.key === "maya" ? "upload" : p.key === "jonas" || p.key === "lea" ? "oauth" : null,
       email_verified: true,
       totp_enabled: p.key === "jonas",
+      time_format: "auto",
       created_at: ago(int(120, 380) * DAY),
     };
     db.users.push(u);
@@ -1512,6 +1513,7 @@ function seedHarbor(): WsData {
     avatar_source: null,
     email_verified: true,
     totp_enabled: false,
+    time_format: "auto",
     created_at: ago(90 * DAY),
   };
   db.users.push(u);
