@@ -36,7 +36,7 @@ import { notifyDesktop, useDesktopBadge, useDesktopPreferences } from "./useDesk
 import { AiBalanceBanner } from "@/components/billing/AiBalanceBanner";
 import { DesktopUpdateBanner } from "@/components/desktop/UpdateBanner";
 import { AllowNotificationsBanner } from "@/components/notifications/AllowBanner";
-import { shell, toggleNav, useNav, useShell } from "./shellStore";
+import { NEW_TICKET_PATH, shell, toggleNav, useNav, useShell } from "./shellStore";
 import { useCollab } from "@/lib/collab/hooks";
 import { useSpaceUi } from "@/lib/spaces/store";
 import { compose } from "@/lib/collab/compose";
@@ -257,12 +257,20 @@ export function AppLayout() {
   const spaceEditor = useSpaceUi((s) => !!s.editor);
   // On the mail pages, c writes new mail and g i goes to the mail inbox.
   const onMail = collab.enabled && section === "mail";
+  // The new ticket page is the dialog's draft on a full page: New ticket there opens nothing more.
+  const onNewTicket = useRouterState({ select: (s) => s.location.pathname === NEW_TICKET_PATH });
+  useEffect(() => {
+    if (onNewTicket && newTicketOpen) shell.newTicket(false);
+  }, [onNewTicket, newTicketOpen]);
 
   useHotkeys({
     "mod+k": () => shell.palette(!useShell.getState().paletteOpen),
     "?": () => shell.shortcuts(),
     "shift+?": () => shell.shortcuts(),
-    c: () => (onMail ? compose.open() : shell.newTicket()),
+    c: () => {
+      if (onMail) compose.open();
+      else if (!onNewTicket) shell.newTicket();
+    },
     b: () => toggleNav(),
     "g i": () =>
       onMail
@@ -338,7 +346,7 @@ export function AppLayout() {
           <UpgradeDialog />
         </Suspense>
       )}
-      {newTicketOpen && (
+      {newTicketOpen && !onNewTicket && (
         <Suspense fallback={null}>
           <NewTicketDialog />
         </Suspense>
