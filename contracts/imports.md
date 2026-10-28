@@ -39,7 +39,13 @@ answers `409 import_running`.
    `merged` by `system` with `via: "import"`, `ticket.updated` for both), but closed without
    automations, notifications or archiving in the mailbox's provider. A copy that also holds
    a message no import wrote (the team worked it here) or one the source keeps in another
-   ticket stays as it is, with the moved messages. A moved message is never written twice. Tickets that did not move in the source are skipped, articles already imported
+   ticket stays as it is, with the moved messages. A moved message is never written twice.
+   A label an earlier run gave a ticket from the source (the ticket's record keeps
+   them, `tag_ids`) that the source has since taken off is taken off here, unless someone put
+   it on the ticket here. Local ownership is stored on `ticket_tags.local_owned`, independent
+   of the label's name, and follows both manual and imported merges without changing the
+   original audit timeline. Existing relations are conservatively kept when migrating from
+   name-only history. The import's own label stays, and so does the label itself. Tickets that did not move in the source are skipped, articles already imported
    are left as they are, and a ticket deleted here stays deleted. CSV imports run once.
 5. **Undo** (`POST /v1/imports/{id}/undo`) removes everything the import created: tickets
    (with every message and attachment on them; a ticket with a message no import wrote, a
