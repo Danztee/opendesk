@@ -84,12 +84,20 @@ describe("assignment skill catalog", () => {
     await mount();
     const skill = ws.skills.find((item) => item.name === "French")!;
     const target = db.users.find((user) => user.name === "Jonas Weber")!;
-    const catalog = [...el.querySelectorAll("section")].find((section) => section.textContent?.includes("Routing skills"));
-    const trigger = [...(catalog?.querySelectorAll("button") ?? [])].find((button) => button.textContent?.includes("2 teammates"));
+    const skillName = [...el.querySelectorAll("*")].find((node) => node.childElementCount === 0 && node.textContent?.trim() === skill.name);
+    let row = skillName?.parentElement;
+    let trigger: HTMLButtonElement | undefined;
+    while (row && !trigger) {
+      trigger = [...row.querySelectorAll("button")].find((button) => button.textContent?.trim().startsWith("2"));
+      row = row.parentElement;
+    }
     expect(trigger).toBeDefined();
     await act(async () => trigger!.click());
-    await settle();
-    const option = [...document.querySelectorAll("[cmdk-item]")].find((item) => item.textContent?.includes(target.name));
+    let option: Element | undefined;
+    for (let i = 0; i < 30 && !option; i++) {
+      await settle();
+      option = [...document.querySelectorAll("[cmdk-item]")].find((item) => item.textContent?.includes(target.name));
+    }
     expect(option).toBeDefined();
     await act(async () => (option as HTMLElement).click());
     for (let i = 0; i < 30 && !ws.skills.find((item) => item.id === skill.id)?.member_ids.includes(target.id); i++) await settle();

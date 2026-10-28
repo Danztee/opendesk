@@ -625,6 +625,7 @@
       "emptyTitle": "Aucune compétence",
       "emptyHint": "Ajoutez des compétences comme Facturation ou Assistance technique.",
       "memberCount_one": "{{count}} membre",
+      "memberCount_many": "{{count}} membres",
       "memberCount_other": "{{count}} membres",
       "members": "Attribuer aux membres",
       "archived": "Archivée",
