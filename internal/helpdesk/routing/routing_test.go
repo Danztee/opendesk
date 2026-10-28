@@ -230,6 +230,29 @@ func TestRoutingRuleSkills(t *testing.T) {
 	e.Do("PATCH", "/v1/routing-rules/"+rule.ID.String(), ad, map[string]any{"skill_ids": []string{foreign.ID.String()}}).Want(t, 422)
 }
 
+func TestRoutingRuleCannotReenableWithArchivedSkill(t *testing.T) {
+	w := newWorld(t)
+	e, ad := w.e, w.admin()
+	var skill skillResponse
+	e.Do("POST", "/v1/skills", ad, map[string]any{"name": "French"}).Want(t, 201).JSON(t, &skill)
+	var rule RoutingRule
+	e.Do("POST", "/v1/routing-rules", ad, map[string]any{
+		"name": "French support", "team_id": w.billing,
+		"conditions": []map[string]any{{"field": "subject", "op": "contains", "value": "help"}},
+		"skill_ids":  []string{skill.ID.String()},
+	}).Want(t, 201).JSON(t, &rule)
+
+	e.Do("PATCH", "/v1/routing-rules/"+rule.ID.String(), ad, map[string]any{"enabled": false}).Want(t, 200)
+	e.Do("PATCH", "/v1/skills/"+skill.ID.String(), ad, map[string]any{"archived": true}).Want(t, 200)
+
+	e.Do("PATCH", "/v1/routing-rules/"+rule.ID.String(), ad, map[string]any{"name": "French support updated"}).Want(t, 200)
+	e.Do("PATCH", "/v1/routing-rules/"+rule.ID.String(), ad, map[string]any{"enabled": true}).Want(t, 422)
+	e.Do("GET", "/v1/routing-rules/"+rule.ID.String(), ad, nil).Want(t, 200).JSON(t, &rule)
+	if rule.Enabled {
+		t.Fatal("rule with an archived required skill was enabled")
+	}
+}
+
 func TestRoutingResolveSkills(t *testing.T) {
 	w := newWorld(t)
 	e, ad := w.e, w.admin()

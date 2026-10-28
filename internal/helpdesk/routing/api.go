@@ -88,6 +88,10 @@ func (b routingRuleBody) apply(ctx context.Context, tx pgx.Tx, wid uuid.UUID, r 
 			return err
 		}
 		r.SkillIDs = ids
+	} else if r.Enabled {
+		if err := validateRuleSkillIDs(ctx, tx, wid, r.SkillIDs); err != nil {
+			return err
+		}
 	}
 	return nil
 }
