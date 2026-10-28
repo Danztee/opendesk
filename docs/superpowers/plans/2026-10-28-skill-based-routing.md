@@ -33,8 +33,8 @@
 ### Task 1: Skill catalog and member assignments
 
 **Files:**
-- Create: `migrations/<next-version>_ticket_skills.up.sql`
-- Create: `migrations/<next-version>_ticket_skills.down.sql`
+- Create: `migrations/000702_ticket_skills.up.sql` (recheck against `upstream/main` immediately before creating; renumber if main has advanced)
+- Create: `migrations/000702_ticket_skills.down.sql` (same version as its up migration)
 - Create: `internal/helpdesk/routing/skills.go`
 - Create: `internal/helpdesk/routing/skills_test.go`
 - Modify: `internal/helpdesk/routing/api.go`
@@ -82,7 +82,6 @@
 - Modify: `internal/domain/write.go`
 - Modify: `internal/domain/types.go`
 - Modify: `internal/domain/load.go`
-- Modify: `internal/domain/visibility.go`
 - Modify: `internal/helpdesk/tickets/trigger.go`
 - Modify: `internal/helpdesk/routing/routing_test.go`
 - Modify: `internal/helpdesk/tickets/trigger_test.go`
@@ -138,13 +137,10 @@
 ### Task 5: Final contract and integration verification
 
 **Files:**
-- Modify: `contracts/api.md`
-- Modify: `contracts/teams.md`
-- Modify: `contracts/events.md`
-- Modify: `qa/README.md` only if the established area detection needs an explicit entry for the new migration or routing files.
+- No planned file changes; contract updates belong to the task that introduces each interface.
 
-- [ ] **Step 1: Review spec coverage** across skill management, rules, strict assignment, no fallback, ticket display, archive lifecycle, team changes, and visibility; close any contract or implementation gap.
+- [ ] **Step 1: Review spec coverage** across skill management, rules, strict assignment, no fallback, ticket display, archive lifecycle, team changes, and visibility; if an integration fix is needed, amend the owning task's files, commit it, and rerun `pnpm qa`.
 - [ ] **Step 2: Run `scripts/check-migrations.sh`** and verify the new migration is above current main and the last release.
 - [ ] **Step 3: Run `go build ./... && go vet ./...`**; expected: both complete successfully.
 - [ ] **Step 4: Run `pnpm qa` from `qa/`** on the committed HEAD; expected: all checks for Go, web, database migrations, and changed areas pass.
-- [ ] **Step 5: Commit any final contract or verification fixes** and rerun `pnpm qa` on the updated committed HEAD.
+- [ ] **Step 5: Confirm the final HEAD is committed and clean**; rerun `pnpm qa` if any verification fix changed the tree.
