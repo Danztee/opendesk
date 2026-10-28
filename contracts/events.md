@@ -104,6 +104,7 @@ view to its owner.
 | `webhook.*` | agents | admins (`private`, `user:<uid>`) | `{ "webhook": Webhook }` / `{ "webhook_id" }` |
 | `brand.created` / `brand.updated` / `brand.deleted` | agents | — | `{ "brand": Brand }` / `{ "brand_id" }` |
 | `routing_rule.created` / `routing_rule.updated` / `routing_rule.deleted` | agents | — | `{ "routing_rule": RoutingRule }` / `{ "routing_rule_id" }` |
+| `skill.created` / `skill.updated` / `skill.members_updated` | agents, owner/admin recipients only | — | `{ "skill": { "id", "name", "archived", "member_ids" } }`; updated includes archive/restore, members_updated replaces the full set |
 | `widget.created` / `widget.updated` / `widget.deleted` | agents | — | `{ "widget": Widget }` / `{ "widget_id" }` |
 | `email_template.updated` | agents | — | `{ "brand_id", "kind": "layout" \| "csat" }` (contracts/templates.md): a brand's email layout or CSAT email was saved or reset; refetch it |
 | `bot.created` / `bot.updated` / `bot.deleted` | agents | — | `{ "bot": Bot }` / `{ "bot_id" }` (contracts/bots.md); a new default, a reorder or a new picture is `bot.updated` of each bot it changed |

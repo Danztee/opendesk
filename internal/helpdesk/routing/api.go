@@ -92,6 +92,7 @@ func changed(ctx context.Context, tx pgx.Tx, p *auth.Principal, verb string, r R
 // Register adds the routing rule routes. They are workspace settings: admins, and API keys
 // with settings:read or settings:write.
 func Register(d *deps.Deps, api huma.API) {
+	registerSkills(d, api)
 	op := func(id, method, path, summary string, status int) huma.Operation {
 		return huma.Operation{OperationID: id, Method: method, Path: path, Summary: summary, Tags: []string{tag}, DefaultStatus: status}
 	}

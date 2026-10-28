@@ -497,3 +497,33 @@ zone holds that no domain does. Every status change publishes `brand.updated`.
 Brands, widgets and help center domains are not limited by plan (contracts/billing.md: plans differ in mailboxes and
 members). At most 50 brands, 50 widgets per brand, 200 teams and 200 routing rules per workspace
 (`422 limit_reached`).
+
+## Skills
+
+Skills are workspace settings used for agent expertise. A `Skill` is
+`{id, name, archived, member_ids}`; `member_ids` are workspace members' user IDs.
+Names use display-name validation (64 characters) and are unique within the workspace,
+case-insensitively, including archived skills.
+
+| Method | Path | Body / response |
+| --- | --- | --- |
+| GET | `/v1/skills` | `{data: Skill[]}`, including archived skills, ordered by name |
+| POST | `/v1/skills` | `{name}` → `Skill` (201) |
+| PATCH | `/v1/skills/{id}` | `{name?, archived?}` → `Skill` |
+| PUT | `/v1/skills/{id}/members` | `{member_ids: string[]}` → `Skill`; replaces the whole set, `[]` clears it |
+
+All endpoints require an owner/admin or an API key with `settings:read` for GET and
+`settings:write` for writes. IDs are scoped to the authenticated workspace; a foreign
+skill is 404. Member IDs must be unique and identify active owners, admins or agents in
+that workspace. Invalid, foreign, viewer or suspended members are rejected (422) before
+replacement, leaving the current assignments intact. Duplicate skill names return 409.
+
+Archiving is soft: ticket requirements and member assignments retain the skill ID and
+label. An enabled routing rule that requires the skill prevents archiving (409); disabled
+rules do not. Archived skills cannot have their member assignments edited (409) until
+restored. They are unavailable for new or edited routing-rule requirements. Renaming,
+archiving, restoring and member replacement do not reassign existing tickets.
+
+Each successful write publishes an admin-only `skill.created`, `skill.updated` or
+`skill.members_updated` event carrying `{skill: Skill}`, and records the same audit action
+against entity `skill`, in the write transaction. `skill.updated` includes archive changes.
