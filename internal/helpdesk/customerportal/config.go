@@ -21,6 +21,7 @@ type brandConfig struct {
 	Color       string        `json:"color"`
 	Locale      string        `json:"locale"`
 	LocaleFixed bool          `json:"locale_fixed"`
+	HelpURL     string        `json:"help_url"`
 }
 
 func helpCenter(ctx context.Context, d *deps.Deps, slug string) (kb.HelpCenter, error) {
@@ -42,7 +43,11 @@ func Register(d *deps.Deps, api huma.API, _ chi.Router) {
 		if err != nil {
 			return nil, err
 		}
-		return &struct{ Body brandConfig }{brandConfig{hc.Title, hc.Logo, hc.Color, hc.Locale, hc.LocaleFixed}}, nil
+		helpURL := d.Cfg.HelpCenterURL(hc.Slug)
+		if hc.ActiveHost != "" {
+			helpURL = "https://" + hc.ActiveHost
+		}
+		return &struct{ Body brandConfig }{brandConfig{hc.Title, hc.Logo, hc.Color, hc.Locale, hc.LocaleFixed, helpURL}}, nil
 	})
 	s.registerAuth(api)
 	s.registerTickets(api)

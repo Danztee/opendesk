@@ -118,8 +118,12 @@ func TestConfigAndUnknownLogin(t *testing.T) {
 	r := e.Do("GET", base(ws)+"/config", hdtest.Auth{}, nil).Want(t, 200)
 	m := r.Map(t)
 	delete(m, "$schema")
-	if len(m) != 5 || m["title"] != "Customer help" || m["color"] != "#123456" || m["locale"] != "fr" {
+	if len(m) != 6 || m["title"] != "Customer help" || m["color"] != "#123456" || m["locale"] != "fr" || m["help_url"] != e.D.Cfg.HelpCenterURL(ws.Slug) {
 		t.Fatalf("config: %s", r.Body)
+	}
+	e.Exec(`INSERT INTO help_domains (workspace_id, brand_id, hostname, token, status, verified_at) VALUES ($1, $2, $3, 't', 'active', now())`, ws.ID, ws.BrandID, ws.Slug+".example.com")
+	if got := e.Do("GET", base(ws)+"/config", hdtest.Auth{}, nil).Want(t, 200).Map(t)["help_url"]; got != "https://"+ws.Slug+".example.com" {
+		t.Fatalf("custom help URL: %v", got)
 	}
 	known := e.Do("POST", base(ws)+"/auth/login", hdtest.Auth{}, body(email)).Want(t, 401)
 	unknown := e.Do("POST", base(ws)+"/auth/login", hdtest.Auth{}, body("unknown@example.com")).Want(t, 401)
