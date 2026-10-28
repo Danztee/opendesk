@@ -45,4 +45,5 @@ func Register(d *deps.Deps, api huma.API, _ chi.Router) {
 		return &struct{ Body brandConfig }{brandConfig{hc.Title, hc.Logo, hc.Color, hc.Locale, hc.LocaleFixed}}, nil
 	})
 	s.registerAuth(api)
+	s.registerTickets(api)
 }
