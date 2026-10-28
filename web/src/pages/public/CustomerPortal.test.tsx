@@ -27,6 +27,7 @@ describe("customer portal", () => {
   it("does not use a weak-password response and clears customer cache without touching agent data", async () => {
     setAccessToken("agent-token");
     queryClient.setQueryData(["customerPortal", "acme", "tickets"], ["private"]);
+    queryClient.setQueryData(["customerPortal", "config", "acme"], { title: "Acme" });
     queryClient.setQueryData(["agent", "tickets"], ["agent"]);
     const fetch = vi.fn().mockResolvedValueOnce(json({ change_password: true }));
     vi.stubGlobal("fetch", fetch);
@@ -34,6 +35,7 @@ describe("customer portal", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][1]).toMatchObject({ credentials: "include" });
     expect(queryClient.getQueryData(["customerPortal", "acme", "tickets"])).toBeUndefined();
+    expect(queryClient.getQueryData(["customerPortal", "config", "acme"])).toEqual({ title: "Acme" });
     expect(queryClient.getQueryData(["agent", "tickets"])).toEqual(["agent"]);
     expect(getAccessToken()).toBe("agent-token");
     setAccessToken(null);

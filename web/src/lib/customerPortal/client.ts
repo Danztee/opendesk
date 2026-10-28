@@ -15,6 +15,9 @@ export function subscribeCustomerIdentity(listener: () => void) {
   identityListeners.add(listener);
   return () => identityListeners.delete(listener);
 }
+function clearCustomerQueries() {
+  queryClient.removeQueries({ predicate: ({ queryKey }) => queryKey[0] === "customerPortal" && queryKey[1] !== "config" });
+}
 function identityChanged() {
   identityVersion++;
   identityListeners.forEach((listener) => listener());
@@ -25,7 +28,7 @@ export function clearCustomer() {
   accessToken = null;
   activeSlug = null;
   activeSubject = null;
-  queryClient.removeQueries({ queryKey: ["customerPortal"] });
+  clearCustomerQueries();
   identityChanged();
 }
 async function request<T>(path: string, body?: unknown, bearer = false): Promise<T> {
@@ -50,7 +53,7 @@ function tokenSubject(token: string): string | null {
 function acceptToken(slug: string, token: string) {
   const subject = tokenSubject(token);
   const changed = activeSubject !== subject || !subject;
-  if (changed) queryClient.removeQueries({ queryKey: ["customerPortal"] });
+  if (changed) clearCustomerQueries();
   accessToken = token;
   activeSlug = slug;
   activeSubject = subject;
