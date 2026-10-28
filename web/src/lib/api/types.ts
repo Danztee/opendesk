@@ -1072,6 +1072,106 @@ export type SupportChannelDelivery = {
   updated_at: string;
   delivered_at?: string;
 };
+/** A field of Shopify's answer a ticket panel can show (contracts/integrations.md "Ticket panels"). */
+export type ShopifyField =
+  | "tags"
+  | "email"
+  | "orders_count"
+  | "total_spent"
+  | "financial_status"
+  | "fulfillment_status"
+  | "line_items"
+  | "line_prices"
+  | "shipping"
+  | "discounts"
+  | "refunds"
+  | "tracking";
+/** A ticket panel (contracts/integrations.md "Ticket panels"): read-only data about a ticket's contact. */
+export type TicketPanel = {
+  id: string;
+  kind: "shopify" | "http";
+  name: string;
+  /** shopify: the shop's myshopify.com domain; http: the URL's host. */
+  host: string;
+  /** shopify: client_credentials when OpenDesk asks Shopify for its token with the app's client ID and secret; access_token when a token was pasted. */
+  auth?: "client_credentials" | "access_token";
+  /** shopify client_credentials: the app's client ID (not a secret). */
+  client_id?: string;
+  /** shopify: the fields tickets show, in catalogue order (the defaults until an admin chooses); http: empty. */
+  fields: ShopifyField[];
+  /** shopify: how many of the last orders show, 1 to 5. */
+  orders_shown?: number;
+  /** http: the regular expression (RE2) that finds order and invoice numbers in the ticket for the request's `ticket.references`; empty finds none. */
+  reference_pattern?: string;
+  enabled: boolean;
+  position: number;
+  /** error: the last lookup found the credentials refused. */
+  status: "connected" | "error";
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+};
+/** A field the panel does not show is left out, and `tags` is empty. */
+export type PanelCustomer = { name: string; url: string; email?: string; orders_count?: number; total_spent?: string; currency?: string; tags: string[] };
+/** A field the panel does not show is left out, and a list is empty. */
+export type PanelOrder = {
+  id: string;
+  number: string;
+  url: string;
+  created_at: string;
+  /** Decimal, after refunds. */
+  total: string;
+  currency: string;
+  financial_status?: string;
+  fulfillment_status?: string;
+  cancelled: boolean;
+  cancelled_at?: string;
+  /** Decimal, what was refunded; absent when nothing was. */
+  refunded?: string;
+  discount_codes: string[];
+  /** Where it goes (city and ISO country, never the street) and the shipping method; absent when there is neither. */
+  shipping?: { city?: string; country?: string; method?: string };
+  /** `price`: the unit price before discounts, decimal, in the order's currency. */
+  items: { title: string; variant?: string; quantity: number; price?: string }[];
+  tracking: { company?: string; number?: string; url?: string }[];
+};
+export type PanelSection = { title: string; items: { label: string; value: string; url?: string }[] };
+/** A tone of an http panel's badges and notes. */
+export type PanelTone = "neutral" | "info" | "success" | "warning" | "danger";
+export type PanelBadge = { text: string; tone: PanelTone };
+/**
+ * A value of an http panel's blocks, as the server cleaned it: always an object. `date` is
+ * YYYY-MM-DD for a day, else an RFC 3339 time in UTC; `money` a decimal and an ISO 4217 code.
+ */
+export type PanelValue =
+  | { type: "text"; text: string }
+  | { type: "date"; value: string; relative?: boolean }
+  | { type: "money"; amount: string; currency: string }
+  | { type: "badge"; text: string; tone: PanelTone };
+export type PanelField = { label?: string; value: PanelValue; url?: string };
+export type PanelLine = { quantity?: number; title: string; subtitle?: string; value?: PanelValue; url?: string };
+export type PanelListItem = { title: string; subtitle?: string; value?: PanelValue; badge?: PanelBadge; url?: string; links?: PanelLink[] };
+/** The record in another tool: a small button by the title. `icon` is one the app draws (TicketPanels' LINK_ICONS or a shipped logo), else the label's first letter shows. */
+export type PanelLink = { label: string; url: string; icon?: string };
+/** A block of an http panel's version 2 answer (contracts/integrations.md "The http answer"). */
+export type PanelBlock =
+  | { type: "card"; title: string; url?: string; subtitle?: string; badges?: PanelBadge[]; links?: PanelLink[]; collapsed?: boolean; fields?: PanelField[]; lines?: PanelLine[]; footer?: PanelField[] }
+  | { type: "fields"; title?: string; items: PanelField[] }
+  | { type: "list"; title?: string; items: PanelListItem[] }
+  | { type: "note"; text: string; tone: PanelTone };
+export type TicketPanelData = {
+  panel_id: string;
+  kind: "shopify" | "http";
+  state: "ok" | "empty" | "no_contact" | "error";
+  message?: string;
+  customer?: PanelCustomer;
+  orders?: PanelOrder[];
+  /** http: a version 1 answer's sections. */
+  sections?: PanelSection[];
+  /** http: a version 2 answer's blocks. */
+  blocks?: PanelBlock[];
+  fetched_at: string;
+};
 export type SupportChannelOperations = {
   window_started_at: string;
   generated_at: string;
