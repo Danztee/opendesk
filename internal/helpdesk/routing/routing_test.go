@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/useopendesk/opendesk/internal/auth"
 	"github.com/useopendesk/opendesk/internal/crypto"
@@ -264,6 +265,21 @@ func TestRoutingResolveSkills(t *testing.T) {
 	if res.RuleID() == nil || *res.RuleID() != first.ID || len(res.RequiredSkillIDs) != 2 ||
 		!slices.Contains(res.RequiredSkillIDs, french.ID) || !slices.Contains(res.RequiredSkillIDs, billing.ID) {
 		t.Fatalf("first matching rule skills %+v", res)
+	}
+	// The route's requirements become part of the ticket, rather than following later
+	// edits to the rule.
+	var ticket domain.Ticket
+	if err := e.D.DB.Tx(e.Ctx, func(tx pgx.Tx) error {
+		var err error
+		ticket, err = domain.CreateTicket(e.Ctx, tx, domain.NewTicket{WorkspaceID: w.ws.ID, Subject: "Invoice",
+			Channel: domain.ChannelEmail, TeamID: res.TeamID, Routed: res.Routed, RequiredSkillIDs: res.RequiredSkillIDs})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ticket.RequiredSkills) != 2 || !slices.ContainsFunc(ticket.RequiredSkills, func(s domain.TicketSkill) bool { return s.ID == french.ID && s.Name == french.Name }) ||
+		!slices.ContainsFunc(ticket.RequiredSkills, func(s domain.TicketSkill) bool { return s.ID == billing.ID && s.Name == billing.Name }) {
+		t.Fatalf("persisted ticket skills %+v", ticket.RequiredSkills)
 	}
 
 	var out RoutingTestResult

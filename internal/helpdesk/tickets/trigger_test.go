@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/useopendesk/opendesk/internal/auth"
 	"github.com/useopendesk/opendesk/internal/domain"
@@ -405,6 +406,152 @@ func TestRoundRobinAndReplies(t *testing.T) {
 	// Viewers are never in the pool.
 	if slices.Contains(got, ws.Viewer.ID) {
 		t.Fatal("viewer assigned")
+	}
+}
+
+func TestSkillAssignment(t *testing.T) {
+	e, ws := newEnv(t)
+	e.SetSettings(ws, map[string]any{"auto_assign": "round_robin"})
+	team := addTeam(t, e, ws, ws.Admin.ID, ws.Agent.ID)
+	french, billing := ids.New(), ids.New()
+	e.Exec(`INSERT INTO skills (id, workspace_id, name) VALUES ($1, $2, 'French'), ($3, $2, 'Billing')`, french, ws.ID, billing)
+	// The admin has only one requirement. The agent is the only complete match.
+	e.Exec(`INSERT INTO member_skills (workspace_id, user_id, skill_id) VALUES ($1, $2, $3), ($1, $4, $3), ($1, $4, $5)`,
+		ws.ID, ws.Admin.ID, french, ws.Agent.ID, billing)
+
+	tid := customerTicket(t, e, ws, domain.NewTicket{Channel: domain.ChannelEmail, TeamID: &team, RequiredSkillIDs: []uuid.UUID{french, billing}})
+	got := getTicket(t, e, ws, tid)
+	if got.Assignee == nil || got.Assignee.ID != ws.Agent.ID {
+		t.Fatalf("skill assignment %+v, want %s", got.Assignee, ws.Agent.ID)
+	}
+	if len(got.RequiredSkills) != 2 || !slices.ContainsFunc(got.RequiredSkills, func(s domain.TicketSkill) bool { return s.ID == french && s.Name == "French" }) ||
+		!slices.ContainsFunc(got.RequiredSkills, func(s domain.TicketSkill) bool { return s.ID == billing && s.Name == "Billing" }) {
+		t.Fatalf("ticket requirements %+v", got.RequiredSkills)
+	}
+
+	// A team change keeps the ticket's requirements. Its sole new-team member lacks
+	// Billing, so the normal assignment retry leaves it unassigned.
+	noMatch := addTeam(t, e, ws, ws.Admin.ID)
+	e.Do("PATCH", "/v1/tickets/"+tid.String(), ws.Agent.As(ws), map[string]any{"team_id": noMatch.String()}).Want(t, 200)
+	runTriggers(t, e, ws.ID)
+	got = getTicket(t, e, ws, tid)
+	if got.Assignee != nil || got.TeamID == nil || *got.TeamID != noMatch || len(got.RequiredSkills) != 2 {
+		t.Fatalf("after team change %+v", got)
+	}
+
+	// No requirements retain the original team-pool round-robin behavior.
+	plain := customerTicket(t, e, ws, domain.NewTicket{Channel: domain.ChannelEmail, TeamID: &noMatch})
+	plainTicket := getTicket(t, e, ws, plain)
+	if plainTicket.Assignee == nil || plainTicket.Assignee.ID != ws.Admin.ID || len(plainTicket.RequiredSkills) != 0 {
+		t.Fatalf("ticket without requirements %+v", plainTicket)
+	}
+}
+
+func TestSkillAssignmentLocksEligibilityUntilAssigned(t *testing.T) {
+	e, ws := newEnv(t)
+	team := addTeam(t, e, ws, ws.Agent.ID)
+	skill := ids.New()
+	e.Exec(`INSERT INTO skills (id, workspace_id, name) VALUES ($1, $2, 'French')`, skill, ws.ID)
+	e.Exec(`INSERT INTO member_skills (workspace_id, user_id, skill_id) VALUES ($1, $2, $3)`, ws.ID, ws.Agent.ID, skill)
+
+	var ticket domain.Ticket
+	if err := e.D.DB.Tx(e.Ctx, func(tx pgx.Tx) error {
+		var err error
+		ticket, err = domain.CreateTicket(e.Ctx, tx, domain.NewTicket{WorkspaceID: ws.ID, Subject: "Bonjour", Channel: domain.ChannelEmail,
+			TeamID: &team, RequiredSkillIDs: []uuid.UUID{skill}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	assign, err := e.D.DB.Pool.Begin(e.Ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer assign.Rollback(e.Ctx)
+	var assignPID int32
+	if err := assign.QueryRow(e.Ctx, `SELECT pg_backend_pid()`).Scan(&assignPID); err != nil {
+		t.Fatal(err)
+	}
+	next, err := tickets.PickAssignee(e.Ctx, assign, ws.ID, &team, tickets.AssignRoundRobin, []uuid.UUID{skill})
+	if err != nil || next == nil || *next != ws.Agent.ID {
+		t.Fatalf("pick assignee %v, %v", next, err)
+	}
+
+	remover, err := e.D.DB.Pool.Begin(e.Ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remover.Rollback(e.Ctx)
+	var removerPID int32
+	if err := remover.QueryRow(e.Ctx, `SELECT pg_backend_pid()`).Scan(&removerPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remover.Exec(e.Ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, ws.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remover.Exec(e.Ctx, `SELECT 1 FROM skills WHERE workspace_id = $1 AND id = $2 FOR UPDATE`, ws.ID, skill); err != nil {
+		t.Fatal(err)
+	}
+	removed := make(chan error, 1)
+	go func() {
+		_, err := remover.Exec(e.Ctx, `DELETE FROM member_skills WHERE workspace_id = $1 AND user_id = $2 AND skill_id = $3`, ws.ID, ws.Agent.ID, skill)
+		removed <- err
+	}()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		var blocked bool
+		if err := e.D.DB.Pool.QueryRow(e.Ctx, `SELECT $1 = ANY(pg_blocking_pids($2))`, assignPID, removerPID).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("skill removal did not wait for assignment")
+		}
+	}
+	if _, err := assign.Exec(e.Ctx, `UPDATE tickets SET assignee_id = $3 WHERE workspace_id = $1 AND id = $2`, ws.ID, ticket.ID, *next); err != nil {
+		t.Fatal(err)
+	}
+	if err := assign.Commit(e.Ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-removed; err != nil {
+		t.Fatal(err)
+	}
+	if err := remover.Commit(e.Ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := getTicket(t, e, ws, ticket.ID).Assignee; got == nil || got.ID != ws.Agent.ID {
+		t.Fatalf("assignment did not commit before removal: %+v", got)
+	}
+	if n := countRows(t, e, `SELECT count(*) FROM member_skills WHERE workspace_id = $1 AND user_id = $2 AND skill_id = $3`, ws.ID, ws.Agent.ID, skill); n != 0 {
+		t.Fatalf("member skill remained after removal: %d", n)
+	}
+}
+
+func TestRequiredSkillsRespectPrivateTicketVisibility(t *testing.T) {
+	e, ws := newEnv(t)
+	skill := ids.New()
+	e.Exec(`INSERT INTO skills (id, workspace_id, name) VALUES ($1, $2, 'Incident response')`, skill, ws.ID)
+	private := addPrivateTeam(t, e, ws, map[uuid.UUID]string{ws.Admin.ID: "lead"})
+	var ticket domain.Ticket
+	if err := e.D.DB.Tx(e.Ctx, func(tx pgx.Tx) error {
+		var err error
+		ticket, err = domain.CreateTicket(e.Ctx, tx, domain.NewTicket{WorkspaceID: ws.ID, Subject: "Private incident",
+			Channel: domain.ChannelAPI, TeamID: &private, RequiredSkillIDs: []uuid.UUID{skill}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := "/v1/tickets/" + ticket.ID.String()
+	// A member outside the private team gets no Ticket object, and therefore no skill
+	// reference, from either the single-ticket or list path.
+	e.Do("GET", path, ws.Agent.As(ws), nil).Want(t, 404)
+	var list struct{ Data []domain.Ticket }
+	e.Do("GET", "/v1/tickets", ws.Agent.As(ws), nil).Want(t, 200).JSON(t, &list)
+	if slices.ContainsFunc(list.Data, func(t domain.Ticket) bool { return t.ID == ticket.ID || len(t.RequiredSkills) != 0 }) {
+		t.Fatalf("private ticket or its required skills leaked in list: %+v", list.Data)
 	}
 }
 

@@ -80,10 +80,11 @@ type TicketStatus = "open" | "pending" | "on_hold" | "solved" | "closed";
 type Priority = "low" | "normal" | "high" | "urgent";
 type Severity = "sev1" | "sev2" | "sev3" | "sev4"; // business impact, sev1 the most severe; a ticket may have none
 type Channel = "email" | "chat" | "api" | "portal" | "phone"; // phone: a ticket a call opened (contracts/phone.md)
+type TicketSkill = { id: string; name: string }; // a workspace skill required by this ticket's matched route
 type Ticket = {
   id: string; number: number; alias: string | null /* optional, workspace-unique reference; not an authorization token */; subject: string; status: TicketStatus; priority: Priority; severity: Severity | null; channel: Channel;
   mailbox_id: string | null; contact: ContactRef | null; assignee: UserRef | null; team_id: string | null;
-  tags: TagRef[]; fields: FieldValues; sla: { policy_id: string; first_response_due_at: string | null; resolution_due_at: string | null; breached: boolean } | null;
+  tags: TagRef[]; required_skills: TicketSkill[] /* fixed when the ticket is created; automatic assignment requires every one, while manual assignment remains available */; fields: FieldValues; sla: { policy_id: string; first_response_due_at: string | null; resolution_due_at: string | null; breached: boolean } | null;
   first_responded_at: string | null; solved_at: string | null; snoozed_until: string | null;
   last_message_at: string; last_customer_message_at: string | null; waiting_since: string | null /* the customer's first unanswered public message; null once anyone (or the AI agent) replied */; unanswered_count: number /* the customer's public messages since the last outbound public reply; 0 once replied */; last_message_preview: string; message_count: number;
   spam: boolean; csat: { score: number; comment: string } | null; custom: Record<string, unknown>;

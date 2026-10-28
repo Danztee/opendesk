@@ -70,8 +70,8 @@ view to its owner.
 
 | type                     | visibility | topics (besides workspace)            | data |
 | ------------------------ | ---------- | ------------------------------------- | ---- |
-| `ticket.created`         | agents     | —                                     | `{ "ticket": Ticket }` |
-| `ticket.updated`         | agents     | `user:<assignee>` when assignee changes | `{ "ticket": Ticket, "changes": ["status","assignee_id","tags","fields",...] }` |
+| `ticket.created`         | agents     | —                                     | `{ "ticket": Ticket }` (including the route's fixed `required_skills`) |
+| `ticket.updated`         | agents     | `user:<assignee>` when assignee changes | `{ "ticket": Ticket, "changes": ["status","assignee_id","tags","fields",...] }` (the ticket's fixed `required_skills` remain in its Ticket shape) |
 | `ticket.deleted`         | agents     | —                                     | `{ "ticket_id": "..." }` |
 | `message.created`        | agents (note) / public (reply on chat ticket) / agents (reply on email ticket) | `contact:<wid>:<cid>:<brand_id>` when public | `{ "ticket_id": "...", "message": Message }` |
 | `message.updated`        | agents (public on chat tickets, never for a marker) | `contact:<wid>:<cid>:<brand_id>` when public | `{ "ticket_id": "...", "message": Message }` (delivery status; an internal note's edit; a message deleted, restored or purged; a note sent as a reply; the widget agent's action card status and visitor rating, `contracts/agent.md`). A deleted message, or a note sent as a reply, is always its marker (`domain.Tombstone`: no text, files or action card) and goes to the team alone, whoever publishes it (delivery, bounce, action card) |
