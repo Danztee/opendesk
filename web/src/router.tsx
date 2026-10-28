@@ -100,15 +100,17 @@ const csatLegacyRoute = createRoute({
   staticData: { title: "rateYourConversation" },
 });
 
+// Capture before createRouter subscribes to browser history.
+const initialPortalResetPath = window.location.pathname;
+const initialPortalResetToken = captureResetToken();
+
 // Customer portal routes are public and never enter the agent app layout.
 const portalPage = page(() => import("./pages/public/CustomerPortal"));
 const portalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/portal/$slug", component: portalPage });
 const portalForgotRoute = createRoute({ getParentRoute: () => rootRoute, path: "/portal/$slug/forgot", component: portalPage });
 const portalResetRoute = createRoute({
   getParentRoute: () => rootRoute, path: "/portal/$slug/reset",
-  beforeLoad: () => {
-    return { portalResetToken: captureResetToken() };
-  },
+  beforeLoad: ({ location }) => ({ portalResetToken: location.pathname === initialPortalResetPath ? initialPortalResetToken : "" }),
   component: portalPage,
 });
 const portalTicketRoute = createRoute({ getParentRoute: () => rootRoute, path: "/portal/$slug/tickets/$ticketId", component: portalPage });

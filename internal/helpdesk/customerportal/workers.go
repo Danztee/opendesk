@@ -75,7 +75,7 @@ func (w *forgotWorker) Work(ctx context.Context, job *river.Job[jobs.CustomerPor
 			return err
 		}
 		site := emails.SiteFrom(w.d.Cfg)
-		link := site.App("/portal/"+url.PathEscape(hc.Slug)+"/reset", "token", token)
+		link := site.App("/portal/"+url.PathEscape(hc.Slug)+"/reset") + "#token=" + url.QueryEscape(token)
 		return enqueueMail(ctx, w.d, tx, email, emails.CustomerPortalReset(site, hc.Title, link))
 	})
 }

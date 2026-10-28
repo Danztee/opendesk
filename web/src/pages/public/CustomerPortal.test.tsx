@@ -43,7 +43,7 @@ describe("customer portal", () => {
     vi.stubGlobal("fetch", fetch);
     await customerPortal.login("acme", "a@example.com", "password");
     queryClient.setQueryData(["customerPortal", "acme", "tickets"], ["private"]);
-    await customerPortal.logout();
+    await customerPortal.logout("acme");
     expect(fetch.mock.calls[1][1]).toMatchObject({ credentials: "include", headers: { Authorization: "Bearer customer" } });
     expect(queryClient.getQueryData(["customerPortal", "acme", "tickets"])).toBeUndefined();
   });
@@ -170,4 +170,66 @@ it("shows detail loading, empty conversation and errors", async () => {
   await vi.waitFor(() => expect(container.textContent).toContain("Something went wrong"));
   expect(container.querySelector("textarea")).toBeNull();
   await act(async () => error.unmount()); container.remove();
+});
+
+it("clears cached tickets when a refresh changes the customer", async () => {
+  const token = (sub: string) => `header.${btoa(JSON.stringify({ sub }))}.signature`;
+  const fetch = vi.fn().mockResolvedValueOnce(json({ access_token: token("first") })).mockResolvedValueOnce(json({ access_token: token("second") }));
+  vi.stubGlobal("fetch", fetch);
+  await refreshCustomer("acme");
+  queryClient.setQueryData(["customerPortal", "acme", "tickets"], ["first customer's ticket"]);
+  await refreshCustomer("acme");
+  expect(queryClient.getQueryData(["customerPortal", "acme", "tickets"])).toBeUndefined();
+});
+
+it("refreshes an expired session before signing out", async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(json({ access_token: "old" })).mockResolvedValueOnce(json({}, 401)).mockResolvedValueOnce(json({ access_token: "new" })).mockResolvedValueOnce(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetch);
+  await customerPortal.login("acme", "a@example.com", "password");
+  await customerPortal.logout("acme");
+  expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({ workspace_slug: "acme" });
+  expect(fetch.mock.calls[3][1].headers.Authorization).toBe("Bearer new");
+});
+
+it("treats a revoked session as signed out but preserves state on network failure", async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(json({ access_token: "old" })).mockResolvedValueOnce(json({}, 401)).mockResolvedValueOnce(json({}, 401));
+  vi.stubGlobal("fetch", fetch);
+  await customerPortal.login("acme", "a@example.com", "password");
+  queryClient.setQueryData(["customerPortal", "acme", "tickets"], ["private"]);
+  await customerPortal.logout("acme");
+  expect(queryClient.getQueryData(["customerPortal", "acme", "tickets"])).toBeUndefined();
+  fetch.mockResolvedValueOnce(json({ access_token: "old" })).mockRejectedValueOnce(new Error("offline"));
+  await customerPortal.login("acme", "a@example.com", "password");
+  queryClient.setQueryData(["customerPortal", "acme", "tickets"], ["private"]);
+  await expect(customerPortal.logout("acme")).rejects.toThrow("offline");
+  expect(queryClient.getQueryData(["customerPortal", "acme", "tickets"])).toEqual(["private"]);
+});
+
+it("keeps a new reply visible on an older message page", async () => {
+  vi.spyOn(customerPortal, "ticket").mockResolvedValue({ id: "1", number: 42, subject: "Delivery", status: "open", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" });
+  const newer = { id: "new", direction: "inbound" as const, body_text: "Latest reply", created_at: "2026-01-02T00:00:00Z" };
+  let sent = false;
+  vi.spyOn(customerPortal, "messages").mockImplementation(async (_slug, _id, cursor) => cursor ? { data: [{ id: "old", direction: "outbound", body_text: "Older message", created_at: "2026-01-01T00:00:00Z" }], next_cursor: null } : { data: sent ? [newer] : [], next_cursor: "older" });
+  vi.spyOn(customerPortal, "reply").mockImplementation(async () => { sent = true; return newer; });
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  await act(async () => root.render(<QueryClientProvider client={queryClient}><Ticket slug="pagination" id="1" /></QueryClientProvider>));
+  await vi.waitFor(() => expect(container.textContent).toContain("Next"));
+  await act(async () => { [...container.querySelectorAll("button")].find((b) => b.textContent === "Next")!.click(); });
+  await vi.waitFor(() => expect(container.textContent).toContain("Older message"));
+  const input = container.querySelector("textarea")!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "Latest reply"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  await act(async () => { container.querySelector<HTMLButtonElement>('button[type="submit"]')!.click(); });
+  await vi.waitFor(() => expect(container.textContent).toContain("Latest reply"));
+  expect(container.textContent).toContain("Older message");
+  await act(async () => root.unmount()); container.remove();
+});
+
+it("leaves history untouched when there is no reset token", () => {
+  history.replaceState(null, "", "/portal/acme/reset#section");
+  const replace = vi.spyOn(history, "replaceState");
+  expect(captureResetToken()).toBe("");
+  expect(replace).not.toHaveBeenCalled();
+  expect(location.hash).toBe("#section");
+  replace.mockRestore();
+  history.replaceState(null, "", "/");
 });

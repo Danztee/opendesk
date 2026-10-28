@@ -84,12 +84,16 @@ func setupToken(t *testing.T, e *hdtest.Env, ws hdtest.WS, email string) string 
 	var text string
 	e.Scalar(`SELECT args->>'text' FROM river_job WHERE kind='mail.system' AND args->>'to'=$1 ORDER BY id DESC LIMIT 1`, &text, email)
 	for _, word := range strings.Fields(text) {
-		if strings.Contains(word, "/reset?token=") {
+		if strings.Contains(word, "/reset#token=") {
 			u, err := url.Parse(word)
 			if err != nil {
 				t.Fatal(err)
 			}
-			return u.Query().Get("token")
+			fragment, err := url.ParseQuery(u.Fragment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return fragment.Get("token")
 		}
 	}
 	t.Fatalf("no reset link: %s", text)
