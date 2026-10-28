@@ -84,12 +84,15 @@ describe("assignment skill catalog", () => {
     await mount();
     const skill = ws.skills.find((item) => item.name === "French")!;
     const target = db.users.find((user) => user.name === "Jonas Weber")!;
-    const skillName = [...el.querySelectorAll("*")].find((node) => node.childElementCount === 0 && node.textContent?.trim() === skill.name);
-    let row = skillName?.parentElement;
     let trigger: HTMLButtonElement | undefined;
-    while (row && !trigger) {
-      trigger = [...row.querySelectorAll("button")].find((button) => button.textContent?.trim().startsWith("2"));
-      row = row.parentElement;
+    for (let i = 0; i < 100 && !trigger; i++) {
+      const skillName = [...el.querySelectorAll("*")].find((node) => node.childElementCount === 0 && node.textContent?.trim() === skill.name);
+      let row = skillName?.parentElement;
+      while (row && !trigger) {
+        trigger = [...row.querySelectorAll("button")].find((button) => !button.hasAttribute("aria-label"));
+        row = row.parentElement;
+      }
+      if (!trigger) await settle();
     }
     expect(trigger).toBeDefined();
     await act(async () => trigger!.click());
