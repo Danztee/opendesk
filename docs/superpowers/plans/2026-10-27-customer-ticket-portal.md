@@ -36,7 +36,7 @@
 ### Task 1: Customer identity, sessions, and password setup
 
 **Files:**
-- Create: `migrations/000695_customer_portal.up.sql` and `.down.sql` (recheck and renumber above current `main` before implementation)
+- Create: `migrations/000701_customer_portal.up.sql` and `.down.sql` (recheck and renumber above current `main` before implementation)
 - Create: `internal/helpdesk/customerportal/config.go`, `auth.go`, `auth_test.go`, `workers.go`
 - Create: `internal/emails/customer_portal.go`
 - Modify: `internal/auth/principal.go`, `tokens.go`, `middleware.go`
