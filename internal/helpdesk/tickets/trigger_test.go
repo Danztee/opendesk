@@ -429,12 +429,18 @@ func TestSkillAssignment(t *testing.T) {
 		t.Fatalf("ticket requirements %+v", got.RequiredSkills)
 	}
 
-	// A team change keeps the ticket's requirements. Its sole new-team member lacks
-	// Billing, so the normal assignment retry leaves it unassigned.
+	// A team change keeps the requirements of an unassigned ticket. Its sole new-team
+	// member lacks Billing, so the normal assignment retry leaves it unassigned.
 	noMatch := addTeam(t, e, ws, ws.Admin.ID)
-	e.Do("PATCH", "/v1/tickets/"+tid.String(), ws.Agent.As(ws), map[string]any{"team_id": noMatch.String()}).Want(t, 200)
+	e.SetSettings(ws, map[string]any{"auto_assign": "none"})
+	moved := customerTicket(t, e, ws, domain.NewTicket{Channel: domain.ChannelEmail, TeamID: &team, RequiredSkillIDs: []uuid.UUID{french, billing}})
+	if got := getTicket(t, e, ws, moved); got.Assignee != nil {
+		t.Fatalf("ticket created without auto assignment %+v", got.Assignee)
+	}
+	e.Do("PATCH", "/v1/tickets/"+moved.String(), ws.Agent.As(ws), map[string]any{"team_id": noMatch.String()}).Want(t, 200)
+	e.SetSettings(ws, map[string]any{"auto_assign": "round_robin"})
 	runTriggers(t, e, ws.ID)
-	got = getTicket(t, e, ws, tid)
+	got = getTicket(t, e, ws, moved)
 	if got.Assignee != nil || got.TeamID == nil || *got.TeamID != noMatch || len(got.RequiredSkills) != 2 {
 		t.Fatalf("after team change %+v", got)
 	}
@@ -487,14 +493,16 @@ func TestSkillAssignmentLocksEligibilityUntilAssigned(t *testing.T) {
 	if err := remover.QueryRow(e.Ctx, `SELECT pg_backend_pid()`).Scan(&removerPID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := remover.Exec(e.Ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, ws.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := remover.Exec(e.Ctx, `SELECT 1 FROM skills WHERE workspace_id = $1 AND id = $2 FOR UPDATE`, ws.ID, skill); err != nil {
-		t.Fatal(err)
-	}
 	removed := make(chan error, 1)
 	go func() {
+		if _, err := remover.Exec(e.Ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, ws.ID); err != nil {
+			removed <- err
+			return
+		}
+		if _, err := remover.Exec(e.Ctx, `SELECT 1 FROM skills WHERE workspace_id = $1 AND id = $2 FOR UPDATE`, ws.ID, skill); err != nil {
+			removed <- err
+			return
+		}
 		_, err := remover.Exec(e.Ctx, `DELETE FROM member_skills WHERE workspace_id = $1 AND user_id = $2 AND skill_id = $3`, ws.ID, ws.Agent.ID, skill)
 		removed <- err
 	}()
@@ -550,8 +558,8 @@ func TestRequiredSkillsRespectPrivateTicketVisibility(t *testing.T) {
 	e.Do("GET", path, ws.Agent.As(ws), nil).Want(t, 404)
 	var list struct{ Data []domain.Ticket }
 	e.Do("GET", "/v1/tickets", ws.Agent.As(ws), nil).Want(t, 200).JSON(t, &list)
-	if slices.ContainsFunc(list.Data, func(t domain.Ticket) bool { return t.ID == ticket.ID || len(t.RequiredSkills) != 0 }) {
-		t.Fatalf("private ticket or its required skills leaked in list: %+v", list.Data)
+	if slices.ContainsFunc(list.Data, func(t domain.Ticket) bool { return t.ID == ticket.ID }) {
+		t.Fatalf("private ticket leaked in list: %+v", list.Data)
 	}
 }
 

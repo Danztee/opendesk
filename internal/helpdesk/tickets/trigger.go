@@ -838,6 +838,12 @@ type candidate struct {
 // qualifying member-skill rows stay key-shared through the caller's assignee write.
 // nil means nobody is eligible.
 func PickAssignee(ctx context.Context, tx pgx.Tx, wid uuid.UUID, team *uuid.UUID, mode string, requiredSkillIDs []uuid.UUID) (*uuid.UUID, error) {
+	// Member-skill replacement takes the workspace lock before locking a skill and
+	// replacing its relations. Take that same first lock before any eligibility or
+	// cursor lock so a removal cannot form a cycle with the assignment event write.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, wid); err != nil {
+		return nil, err
+	}
 	requiredSkillIDs = slices.Clone(requiredSkillIDs)
 	slices.SortFunc(requiredSkillIDs, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
 	requiredSkillIDs = slices.Compact(requiredSkillIDs)
