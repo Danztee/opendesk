@@ -18,6 +18,7 @@ and a consumer accepts exactly one purpose. `exp` is required.
 | `notification_unsubscribe` | notification emails (`contracts/api.md` "Notification preferences and emails") | 90 days | `POST /v1/notifications/unsubscribe` and `/unsubscribe/one-click` |
 | `admin_mfa` | `POST /v1/admin/auth/login` (contracts/admin.md) | 5 min | `POST /v1/admin/auth/mfa` |
 | `admin`      | `POST /v1/admin/auth/mfa` and `/refresh` | 10 min | `/v1/admin/*` only (Bearer); the admin session (`sid`) is checked on every request |
+| `customer_access` | customer portal login and refresh | 15 min | `/v1/customer/portal/*` only; the customer session (`sid`) is checked on every request |
 
 ## Claims
 

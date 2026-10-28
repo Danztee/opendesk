@@ -829,6 +829,22 @@ Product updates a workspace publishes on its help centers (contracts/teams.md "S
 - The slug is taken from the title unless given; a slug in use is `409 conflict`. Entries and articles have
   separate slugs.
 
+### Customer portal authentication (owner: backend-helpdesk)
+
+The portal uses a separate customer identity for existing contacts; see [Customer portal](customer-portal.md).
+The public routes below are rate limited and use Turnstile. They set `Cache-Control: no-store`.
+
+| method | path | notes |
+| --- | --- | --- |
+| GET | `/v1/public/help/{workspace_slug}/portal/config` | Public brand config: `{title, logo_url, color, locale, locale_fixed, help_url}`. `help_url` is the active verified help-center host, or the configured default URL |
+| POST | `/v1/public/help/{workspace_slug}/portal/auth/login` | `{email, password, turnstile_token}` → `{access_token, expires_at}` and sets the customer refresh cookie. Unknown contacts and invalid passwords receive the same invalid-credentials response. A legacy password that no longer meets policy returns `{change_password: true}` with no token or session |
+| POST | `/v1/public/help/{workspace_slug}/portal/auth/forgot` | `{email, turnstile_token}` → `204`. The response does not reveal whether an eligible contact exists; email lookup and delivery are queued |
+| POST | `/v1/public/help/{workspace_slug}/portal/auth/reset` | `{token, password, turnstile_token}` → `204`. The one-time link is scoped to its workspace, contact and email snapshot; success consumes it and revokes the contact's other customer sessions |
+| POST | `/v1/customer/portal/auth/refresh` | `{workspace_slug}` plus the customer refresh cookie → `{access_token, expires_at}` and rotates the cookie. The slug must resolve to the session's enabled help center |
+| POST | `/v1/customer/portal/auth/logout` | Customer access token → `204`, revokes that session and clears its refresh cookie |
+
+HTTPS uses the host-only HttpOnly `__Host-od_customer_refresh` cookie with SameSite=Lax and Path `/`; HTTP development uses `od_customer_refresh`. The cookie is accepted only without Origin or from the configured app origin, and is never returned in a body.
+
 ### Customer portal tickets (owner: backend-helpdesk)
 
 These routes require a customer access token. The live customer session supplies both workspace
