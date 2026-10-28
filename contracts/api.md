@@ -19,6 +19,8 @@ it exists, and this file is the contract the parts are built against.
 - Workspace-scoped routes need `OD-Workspace: <id>` (agents) or an API key. An `OD-Workspace` the caller is not a member of (or that no longer exists) is treated as absent: `400 workspace_required`, the same answer either way.
 - PATCH bodies: an omitted or `null` member is left unchanged. Clear an optional reference with `""`
   (mailbox `team_id`, KB article `collection_id`) unless the route documents `null` (ticket PATCH, contact `company_id`).
+  A relationship list is similarly preserved when omitted; routes that support clearing it document an
+  explicit empty array (for example, routing-rule `skill_ids`).
 - Idempotency: `Idempotency-Key` header (1..255 printable ASCII) on authenticated POST routes, kept 24h per
   workspace and principal. A retry with the same key, route and body replays the stored response with
   `Idempotent-Replayed: true`; a different body or route is `422 idempotency_key_reused`, a retry while the first

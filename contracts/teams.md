@@ -89,6 +89,7 @@ type Message = Message /* contracts/api.md */ & { mailbox_id: string | null /* s
 type RoutingRule = {
   id: string; name: string; enabled: boolean; position: number; run_count: number;
   match: "all" | "any"; conditions: RoutingCondition[] /* 1..20 */; team_id: string;
+  skill_ids: string[] /* required for automatic assignment; [] means no skill requirement */;
   created_at: string; updated_at: string;
 };
 type RoutingCondition = {
@@ -132,9 +133,9 @@ type TicketCounts = TicketCounts & {
 | POST | `/v1/widgets/{id}/secret/rotate` | owner-level gate (MFA and recent login) → `{secret}` once. Each widget has its own secret; a new widget answers its first secret on create (`secret`, shown once) when the creator passes the same gate |
 | PUT/DELETE | `/v1/widgets/{id}/images/{slot}` | admin. `avatar`, `launcher` |
 | GET/PATCH | `/v1/widget/settings` | kept: the default brand's first widget |
-| CRUD | `/v1/routing-rules`, `/v1/routing-rules/{id}` | admin (keys: `settings:read` / `settings:write`). Create `{name, team_id, conditions, match?, enabled?}`, new rules go last. Audit `routing_rule.created`/`updated`/`deleted` |
+| CRUD | `/v1/routing-rules`, `/v1/routing-rules/{id}` | admin (keys: `settings:read` / `settings:write`). Create `{name, team_id, conditions, skill_ids?, match?, enabled?}`, new rules go last. PATCH omits `skill_ids` to preserve them and sends `[]` to clear them. Skill IDs are workspace-scoped, unique and cannot name archived skills. Audit `routing_rule.created`/`updated`/`deleted` |
 | POST | `/v1/routing-rules/reorder` | admin `{ids}`: every rule of the workspace once, in the order they are tried → the rules. `routing_rule.updated` per moved rule, audit `routing_rule.reordered` |
-| POST | `/v1/routing/test` | admin `{channel: "email" \| "chat", to?, from?, subject?, body?, widget_id?, topic?, page_url?}` → `{team_id, brand_id, mailbox_id, routed, steps: {rule_id, name, matched: true \| false \| "unknown"}[] , assign_mode}`: where a message like this would go, without creating anything or counting a run. `to` is a mailbox's address, one of its aliases or its forwarding address; `from` finds the contact for `contact.field.*` conditions |
+| POST | `/v1/routing/test` | admin `{channel: "email" \| "chat", to?, from?, subject?, body?, widget_id?, topic?, page_url?}` → `{team_id, brand_id, mailbox_id, routed, steps: {rule_id, name, matched: true \| false \| "unknown"}[], required_skills: Skill[], assign_mode}`: where a message like this would go, without creating anything or counting a run. `required_skills` is the first matching rule's requirements, or `[]` when no rule matches. `to` is a mailbox's address, one of its aliases or its forwarding address; `from` finds the contact for `contact.field.*` conditions |
 | PATCH | `/v1/tickets/{id}` | also `mailbox_id` (the reply address, an address of the ticket's brand the caller may send from) and `brand_id`. Changing `team_id` may change `mailbox_id` (below). The answer is always the changed ticket; when the change left it where the caller may not see it (a private team they are not on), the response carries `OD-Ticket-Hidden: true` and clients drop it, as later reads are `404` |
 | POST | `/v1/tickets/{id}/messages` | also `mailbox_id?`: send this reply from another address the caller may send from; it becomes the ticket's reply address. A reply without `mailbox_id` from a reply address the caller may not send from is `403 reply_address_forbidden`: pick another address |
 | GET | `/v1/tickets` | also `brand_id`, `widget_id`, and `team_id` as a comma-separated list of team ids, `mine` (the caller's teams) and `none` (no team), matching any of them (at most 50; views' `filters.team_id` take the same) |
@@ -175,8 +176,9 @@ A new ticket gets its team, in order:
    **Widget**: a chat gets the topic's team (`topic`), else the widget's team (`widget`).
    **API**: `team_id` from the body (`api`), else the mailbox's team.
 2. **Routing rules**, in `position` order: the first enabled rule whose conditions match moves the
-   ticket to its team (`rule`, with `rule_id` and `rule_name`), whatever step 1 chose. `run_count`
-   counts matches.
+   ticket to its team (`rule`, with `rule_id` and `rule_name`) and supplies its `skill_ids`, whatever
+   step 1 chose. `run_count` counts matches. A rule with no skills leaves the ticket unrestricted;
+   address, widget and API routing do not add skill requirements.
 
    Conditions compare text case-insensitively after trimming: `equals`, `not_equals`, `contains`,
    `not_contains`, `starts_with` (a value is required except for `equals`/`not_equals`). `channel`

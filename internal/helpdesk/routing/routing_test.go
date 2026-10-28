@@ -2,6 +2,7 @@ package routing
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -187,6 +188,104 @@ func TestRoutingRulesAPI(t *testing.T) {
 	res := e.Do("POST", "/v1/routing-rules", ad, map[string]any{"name": "one more", "team_id": w.billing, "conditions": cond("subject", "contains", "a")})
 	if res.Status != 422 || !strings.Contains(string(res.Body), "limit_reached") {
 		t.Fatalf("limit: %d %s", res.Status, res.Body)
+	}
+}
+
+func TestRoutingRuleSkills(t *testing.T) {
+	w := newWorld(t)
+	e, ad := w.e, w.admin()
+	createSkill := func(name string) skillResponse {
+		t.Helper()
+		var skill skillResponse
+		e.Do("POST", "/v1/skills", ad, map[string]any{"name": name}).Want(t, 201).JSON(t, &skill)
+		return skill
+	}
+	french, billing := createSkill("French"), createSkill("Billing")
+	var rule RoutingRule
+	e.Do("POST", "/v1/routing-rules", ad, map[string]any{
+		"name": "French billing", "team_id": w.billing,
+		"conditions": []map[string]any{{"field": "subject", "op": "contains", "value": "invoice"}},
+		"skill_ids":  []string{billing.ID.String(), french.ID.String()},
+	}).Want(t, 201).JSON(t, &rule)
+	if len(rule.SkillIDs) != 2 || !slices.Contains(rule.SkillIDs, french.ID) || !slices.Contains(rule.SkillIDs, billing.ID) {
+		t.Fatalf("created rule skills %+v", rule.SkillIDs)
+	}
+
+	// Omitting skill_ids keeps the existing requirements; an explicit empty list clears them.
+	e.Do("PATCH", "/v1/routing-rules/"+rule.ID.String(), ad, map[string]any{"name": "Invoice expertise"}).Want(t, 200).JSON(t, &rule)
+	if len(rule.SkillIDs) != 2 {
+		t.Fatalf("omitted skills were not preserved: %+v", rule.SkillIDs)
+	}
+	e.Do("PATCH", "/v1/routing-rules/"+rule.ID.String(), ad, map[string]any{"skill_ids": []string{}}).Want(t, 200).JSON(t, &rule)
+	if len(rule.SkillIDs) != 0 {
+		t.Fatalf("skills were not cleared: %+v", rule.SkillIDs)
+	}
+
+	e.Do("PATCH", "/v1/skills/"+french.ID.String(), ad, map[string]any{"archived": true}).Want(t, 200)
+	e.Do("PATCH", "/v1/routing-rules/"+rule.ID.String(), ad, map[string]any{"skill_ids": []string{french.ID.String()}}).Want(t, 422)
+	other := e.NewWorkspace()
+	var foreign skillResponse
+	e.Do("POST", "/v1/skills", other.Admin.As(other), map[string]any{"name": "Other workspace"}).Want(t, 201).JSON(t, &foreign)
+	e.Do("PATCH", "/v1/routing-rules/"+rule.ID.String(), ad, map[string]any{"skill_ids": []string{foreign.ID.String()}}).Want(t, 422)
+}
+
+func TestRoutingResolveSkills(t *testing.T) {
+	w := newWorld(t)
+	e, ad := w.e, w.admin()
+	createSkill := func(name string) skillResponse {
+		t.Helper()
+		var skill skillResponse
+		e.Do("POST", "/v1/skills", ad, map[string]any{"name": name}).Want(t, 201).JSON(t, &skill)
+		return skill
+	}
+	french, billing, mobile := createSkill("French"), createSkill("Billing"), createSkill("Mobile")
+	createRule := func(name string, team uuid.UUID, skills []uuid.UUID) RoutingRule {
+		t.Helper()
+		ids := make([]string, 0, len(skills))
+		for _, id := range skills {
+			ids = append(ids, id.String())
+		}
+		var rule RoutingRule
+		e.Do("POST", "/v1/routing-rules", ad, map[string]any{
+			"name": name, "team_id": team,
+			"conditions": []map[string]any{{"field": "channel", "op": "equals", "value": "email"}},
+			"skill_ids":  ids,
+		}).Want(t, 201).JSON(t, &rule)
+		return rule
+	}
+	first := createRule("French billing", w.billing, []uuid.UUID{french.ID, billing.ID})
+	_ = createRule("Mobile later", w.support, []uuid.UUID{mobile.ID})
+
+	in := Input{WorkspaceID: w.ws.ID, Channel: domain.ChannelEmail, MailboxID: &w.mailbox, ReceivedAt: "sales@acme.test"}
+	res, err := Resolve(context.Background(), e.D.DB.Pool, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RuleID() == nil || *res.RuleID() != first.ID || len(res.RequiredSkillIDs) != 2 ||
+		!slices.Contains(res.RequiredSkillIDs, french.ID) || !slices.Contains(res.RequiredSkillIDs, billing.ID) {
+		t.Fatalf("first matching rule skills %+v", res)
+	}
+
+	var out RoutingTestResult
+	e.Do("POST", "/v1/routing/test", ad, map[string]any{"channel": "email", "to": "sales@acme.test"}).Want(t, 200).JSON(t, &out)
+	if len(out.RequiredSkills) != 2 || !slices.ContainsFunc(out.RequiredSkills, func(s Skill) bool { return s.ID == french.ID }) ||
+		!slices.ContainsFunc(out.RequiredSkills, func(s Skill) bool { return s.ID == billing.ID }) {
+		t.Fatalf("routing test skills %+v", out.RequiredSkills)
+	}
+
+	e.Exec(`UPDATE routing_rules SET enabled=false WHERE workspace_id=$1`, w.ws.ID)
+	e.Do("POST", "/v1/routing/test", ad, map[string]any{"channel": "email", "to": "sales@acme.test"}).Want(t, 200).JSON(t, &out)
+	if out.RequiredSkills == nil || len(out.RequiredSkills) != 0 {
+		t.Fatalf("unmatched test skills %+v", out.RequiredSkills)
+	}
+
+	empty := createRule("No requirements", w.support, nil)
+	res, err = Resolve(context.Background(), e.D.DB.Pool, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RuleID() == nil || *res.RuleID() != empty.ID || res.RequiredSkillIDs == nil || len(res.RequiredSkillIDs) != 0 {
+		t.Fatalf("empty rule skills %+v", res)
 	}
 }
 
