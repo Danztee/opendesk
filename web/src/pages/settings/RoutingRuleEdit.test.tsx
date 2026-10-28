@@ -11,6 +11,7 @@ import { installMock } from "@/mock";
 import { db } from "@/mock/db";
 import { evaluateRouting } from "@/mock/teams";
 import RoutingRuleEdit from "./RoutingRuleEdit";
+import Routing from "./Routing";
 
 const routeState = vi.hoisted(() => ({ ruleId: "" }));
 vi.mock("@/components/settings2/UnsavedGuard", () => ({ UnsavedGuard: () => null }));
@@ -58,6 +59,7 @@ describe("skill-based routing rule editor", () => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     await act(async () => root.render(<QueryClientProvider client={qc}><TooltipProvider><ConfirmProvider><RoutingRuleEdit /></ConfirmProvider></TooltipProvider></QueryClientProvider>));
     for (let i = 0; i < 100 && (!el.querySelector("#rule-name") || !qc.getQueryData(qk.skills)); i++) await settle();
+    await settle();
   };
 
   it("selects active skills and saves them on the rule", async () => {
@@ -83,6 +85,29 @@ describe("skill-based routing rule editor", () => {
     rule.skill_ids = original;
   });
 
+  it("clears a skill selection in the editor", async () => {
+    const rule = ws.routingRules.find((item) => item.id === routeState.ruleId)!;
+    const original = [...rule.skill_ids];
+    const skill = ws.skills.find((item) => item.name === "Billing")!;
+    rule.skill_ids = [];
+    await mount();
+    const trigger = [...el.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Choose skills");
+    expect(trigger).toBeDefined();
+    await act(async () => trigger!.click());
+    await settle();
+    const option = [...document.querySelectorAll("[cmdk-item]")].find((item) => item.textContent?.includes(skill.name));
+    expect(option).toBeDefined();
+    await act(async () => (option as HTMLElement).click());
+    await settle();
+    expect([...el.querySelectorAll("button")].some((button) => button.textContent?.trim() === skill.name)).toBe(true);
+    const selectedOption = [...document.querySelectorAll("[cmdk-item]")].find((item) => item.textContent?.includes(skill.name));
+    expect(selectedOption).toBeDefined();
+    await act(async () => (selectedOption as HTMLElement).click());
+    await settle();
+    expect([...el.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Choose skills")).toBe(true);
+    rule.skill_ids = original;
+  });
+
   it("omits an archived skill when an unrelated edit saves the rule", async () => {
     const rule = ws.routingRules.find((item) => item.id === routeState.ruleId)!;
     const active = ws.skills[0];
@@ -105,6 +130,32 @@ describe("skill-based routing rule editor", () => {
     for (let i = 0; i < 30 && !rule.name.endsWith("edited"); i++) await settle();
     expect(rule.name).toContain("edited");
     expect(rule.skill_ids).not.toContain(archived.id);
+  });
+
+  it("shows required skill labels returned by the routing test panel", async () => {
+    const rule = ws.routingRules.find((item) => item.enabled)!;
+    const original = { ...rule, conditions: rule.conditions.map((condition) => ({ ...condition })), skill_ids: [...rule.skill_ids] };
+    const skill = ws.skills.find((item) => item.name === "Billing")!;
+    rule.match = "all";
+    rule.conditions = [{ field: "subject", op: "contains", value: "skill preview" }];
+    rule.skill_ids = [skill.id];
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    await act(async () => root.render(<QueryClientProvider client={qc}><TooltipProvider><ConfirmProvider><Routing /></ConfirmProvider></TooltipProvider></QueryClientProvider>));
+    for (let i = 0; i < 100 && (!qc.getQueryData(qk.skills) || !el.querySelector('input[placeholder="Question about my invoice"]')); i++) await settle();
+    const subject = el.querySelector<HTMLInputElement>('input[placeholder="Question about my invoice"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(subject, "skill preview");
+      subject.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await settle();
+    const run = [...el.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Test");
+    expect(run).toBeDefined();
+    await act(async () => run!.click());
+    for (let i = 0; i < 50 && !el.textContent?.includes("Required skills"); i++) await settle();
+    expect(el.textContent).toContain("Required skills");
+    expect(el.textContent).toContain("Billing");
+    Object.assign(rule, original);
   });
 
   it("returns required skills in the mock routing result", () => {

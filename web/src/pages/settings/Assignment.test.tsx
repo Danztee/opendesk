@@ -39,7 +39,7 @@ describe("assignment skill catalog", () => {
   let el: HTMLDivElement;
 
   beforeEach(() => {
-    saved = ws.skills;
+    saved = structuredClone(ws.skills);
     el = document.createElement("div");
     document.body.appendChild(el);
     root = createRoot(el);
@@ -78,6 +78,22 @@ describe("assignment skill catalog", () => {
     await act(async () => (create as HTMLElement).click());
     for (let i = 0; i < 20 && !ws.skills.some((skill) => skill.name === "UI-created skill"); i++) await settle();
     expect(ws.skills.some((skill) => skill.name === "UI-created skill")).toBe(true);
+  });
+
+  it("assigns a teammate to a skill from its member picker", async () => {
+    await mount();
+    const skill = ws.skills.find((item) => item.name === "French")!;
+    const target = db.users.find((user) => user.name === "Jonas Weber")!;
+    const catalog = [...el.querySelectorAll("section")].find((section) => section.textContent?.includes("Routing skills"));
+    const trigger = [...(catalog?.querySelectorAll("button") ?? [])].find((button) => button.textContent?.includes("2 teammates"));
+    expect(trigger).toBeDefined();
+    await act(async () => trigger!.click());
+    await settle();
+    const option = [...document.querySelectorAll("[cmdk-item]")].find((item) => item.textContent?.includes(target.name));
+    expect(option).toBeDefined();
+    await act(async () => (option as HTMLElement).click());
+    for (let i = 0; i < 30 && !ws.skills.find((item) => item.id === skill.id)?.member_ids.includes(target.id); i++) await settle();
+    expect(ws.skills.find((item) => item.id === skill.id)?.member_ids).toContain(target.id);
   });
 
   it("creates a skill and assigns it to eligible teammates through the mock API", async () => {
