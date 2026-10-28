@@ -458,6 +458,7 @@ func TestLoginReadsPasswordAfterContactLock(t *testing.T) {
 func TestLoginFlagsPasswordThatNoLongerMeetsPolicy(t *testing.T) {
 	e, ws, id, email := portalEnv(t)
 	reset(t, e, ws, setupToken(t, e, ws, email)).Want(t, 204)
+	access, _ := signIn(t, e, ws, email)
 	oldPassword := "password"
 	hash, err := auth.HashPassword(oldPassword)
 	if err != nil {
@@ -465,9 +466,18 @@ func TestLoginFlagsPasswordThatNoLongerMeetsPolicy(t *testing.T) {
 	}
 	e.Exec(`UPDATE customer_credentials SET password_hash=$2 WHERE contact_id=$1`, id, hash)
 	r := e.Do("POST", base(ws)+"/auth/login", hdtest.Auth{}, map[string]any{"email": email, "password": oldPassword}).Want(t, 200)
-	if r.Map(t)["change_password"] != true {
-		t.Fatal("login must ask for a password that meets the current policy")
+	if r.Map(t)["change_password"] != true || r.Map(t)["access_token"] != "" {
+		t.Fatal("weak password must require reset without issuing a customer access token")
 	}
+	if cookies := r.Header.Values("Set-Cookie"); len(cookies) != 1 || !strings.Contains(cookies[0], "Max-Age=0") {
+		t.Fatalf("weak-password login must clear the refresh cookie: %v", cookies)
+	}
+	var active int
+	e.Scalar(`SELECT count(*) FROM customer_sessions WHERE workspace_id=$1 AND contact_id=$2 AND revoked_at IS NULL`, &active, ws.ID, id)
+	if active != 0 {
+		t.Fatalf("weak-password login left %d active sessions", active)
+	}
+	e.Do("GET", "/customer-test", hdtest.Auth{Bearer: access}, nil).Want(t, 401)
 }
 
 func TestRefreshRequiresPortalContext(t *testing.T) {

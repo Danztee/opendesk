@@ -260,6 +260,18 @@ func (s *service) login(ctx context.Context, slug string, in loginBody) (*authOu
 		if !active {
 			return nil
 		}
+		if auth.CheckPassword(in.Password) != nil {
+			// A weak legacy password may be verified, but it must not establish a
+			// customer session. Revoke any existing session and clear its cookie so
+			// the portal can require the password-link flow without relying on a
+			// follow-up browser logout request.
+			if _, err := tx.Exec(ctx, `UPDATE customer_sessions SET revoked_at=now()
+   WHERE workspace_id=$1 AND contact_id=$2 AND revoked_at IS NULL`, hc.WorkspaceID, cid); err != nil {
+				return err
+			}
+			out = &authOut{SetCookie: s.cookie("", -1), Body: authResult{ChangePassword: true}}
+			return audit.Log(ctx, tx, p, hc.WorkspaceID, "customer.login.password_change_required", "contact", &cid, nil)
+		}
 		sid := ids.New()
 		refresh := crypto.RandomToken(32)
 		expires := time.Now().Add(auth.RefreshTTL)
@@ -272,7 +284,6 @@ func (s *service) login(ctx context.Context, slug string, in loginBody) (*authOu
 		if errOut != nil {
 			return errOut
 		}
-		out.Body.ChangePassword = auth.CheckPassword(in.Password) != nil
 		return audit.Log(ctx, tx, p, hc.WorkspaceID, "customer.login", "contact", &cid, nil)
 	})
 	if err != nil {
