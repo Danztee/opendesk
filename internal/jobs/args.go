@@ -444,3 +444,17 @@ func (SeedTestWorkspaceArgs) Kind() string { return "admin.seed_test_workspace" 
 type ResealArgs struct{}
 
 func (ResealArgs) Kind() string { return "sealed.reseal" }
+
+// CustomerPortalForgotArgs defers contact lookup so forgot responses are uniform.
+type CustomerPortalForgotArgs struct {
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+	Slug        string    `json:"slug"`
+	Email       string    `json:"email"`
+}
+
+func (CustomerPortalForgotArgs) Kind() string { return "helpdesk.customer_portal_forgot" }
+
+// CustomerPortalCleanupArgs removes expired customer sessions and reset links.
+type CustomerPortalCleanupArgs struct{}
+
+func (CustomerPortalCleanupArgs) Kind() string { return "helpdesk.customer_portal_cleanup" }
