@@ -832,6 +832,47 @@ Product updates a workspace publishes on its help centers (contracts/teams.md "S
 - The slug is taken from the title unless given; a slug in use is `409 conflict`. Entries and articles have
   separate slugs.
 
+### Customer portal authentication (owner: backend-helpdesk)
+
+The portal uses a separate customer identity for existing contacts; see [Customer portal](customer-portal.md).
+The public routes below are rate limited and use Turnstile. They set `Cache-Control: no-store`.
+
+| method | path | notes |
+| --- | --- | --- |
+| GET | `/v1/public/help/{workspace_slug}/portal/config` | Public brand config: `{title, logo_url, color, locale, locale_fixed, help_url}`. `help_url` is the active verified help-center host, or the configured default URL |
+| POST | `/v1/public/help/{workspace_slug}/portal/auth/login` | `{email, password, turnstile_token}` → `{access_token, expires_at}` and sets the customer refresh cookie. Unknown contacts and invalid passwords receive the same invalid-credentials response. A legacy password that no longer meets policy returns `{change_password: true}` with no token or session |
+| POST | `/v1/public/help/{workspace_slug}/portal/auth/forgot` | `{email, turnstile_token}` → `204`. The response does not reveal whether an eligible contact exists; email lookup and delivery are queued |
+| POST | `/v1/public/help/{workspace_slug}/portal/auth/reset` | `{token, password, turnstile_token}` → `204`. The one-time link is scoped to its workspace, contact and email snapshot; success consumes it and revokes the contact's other customer sessions |
+| POST | `/v1/customer/portal/auth/refresh` | `{workspace_slug}` plus the customer refresh cookie → `{access_token, expires_at}` and rotates the cookie. The slug must resolve to the session's enabled help center |
+| POST | `/v1/customer/portal/auth/logout` | Customer access token → `204`, revokes that session and clears its refresh cookie |
+
+HTTPS uses the host-only HttpOnly `__Host-od_customer_refresh` cookie with SameSite=Lax and Path `/`; HTTP development uses `od_customer_refresh`. The cookie is accepted only without Origin or from the configured app origin, and is never returned in a body.
+
+### Customer portal tickets (owner: backend-helpdesk)
+
+These routes require a customer access token. The live customer session supplies both workspace
+and contact identity. Member tokens, API keys and widget visitor tokens do not grant access.
+A contact can read and reply to their own tickets, including tickets assigned to private teams.
+Tickets belonging to another contact or workspace, spam tickets and deleted tickets return `404`.
+Responses are `Cache-Control: no-store`.
+
+```ts
+type CustomerTicket = { id: string; number: number; subject: string; status: TicketStatus; created_at: string; updated_at: string };
+type CustomerMessage = { id: string; direction: "inbound" | "outbound"; body_text: string; created_at: string };
+```
+
+| method | path | notes |
+| --- | --- | --- |
+| GET | `/v1/customer/portal/tickets` | `{data: CustomerTicket[], next_cursor: string \| null}`; `limit` defaults to 50, range 1..100. Ordered by `updated_at DESC, id DESC`; pass `next_cursor` as `cursor` for the next page |
+| GET | `/v1/customer/portal/tickets/{id}` | `CustomerTicket` |
+| GET | `/v1/customer/portal/tickets/{id}/messages` | `{data: CustomerMessage[], next_cursor: string \| null}`; same bounded `limit` and `cursor`, ordered chronologically by `created_at ASC, id ASC`. Only public replies, with text only; notes, side threads, removed/purged/retracted messages and failed sender-check messages are omitted |
+| POST | `/v1/customer/portal/tickets/{id}/messages` | `{body: string}` (1..10000 characters; whitespace-only refused) → `201 CustomerMessage`. Plain text is trimmed and safely converted to HTML for storage. Written as an inbound contact reply through the normal message transaction, ticket events and `customer_replied` trigger. Pending, on-hold and solved tickets reopen; closed tickets stay closed |
+
+The customer shapes expose no internal ticket fields, agent identities, HTML, email headers,
+attachments or internal activities. Replies accept only plain text; ticket creation, uploads, CCs,
+status changes and side threads are outside these routes. Cursors are opaque, bounded to 512
+characters and validated; malformed or incomplete cursors return `400`.
+
 ### Public, no auth (owner: backend-helpdesk)
 | method | path | notes |
 | --- | --- | --- |

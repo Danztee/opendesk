@@ -39,7 +39,7 @@ export function keyBody(key: readonly unknown[]): readonly unknown[] {
 }
 
 /** The roots a user-level key may start with (src/lib/queryKeys.test.ts holds every literal key to it). */
-export const USER_ROOTS = new Set(["auth-config", "me", "public", "invitation-lookup", "oauth", "totp-setup"]);
+export const USER_ROOTS = new Set(["auth-config", "me", "public", "invitation-lookup", "oauth", "totp-setup", "customerPortal"]);
 
 export const qk = {
   /** Every key of one workspace (default: the one in scope). */
