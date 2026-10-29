@@ -90,6 +90,27 @@
     "reorderSectionAria": "Réorganiser la section {{name}}. Maintenez Alt et appuyez sur les touches fléchées pour la déplacer avec ses vues.",
     "sectionChars": "Un nom de section ne peut pas contenir < ou >.",
     "needName": "Donnez un nom à la vue.",
+    "icon": {
+      "label": "Icône",
+      "change": "Modifier",
+      "preview": "Dans la barre latérale",
+      "none": "Aucune",
+      "tabs": {
+        "emoji": "Emoji",
+        "icon": "Icône",
+        "text": "Texte"
+      },
+      "searchEmoji": "Rechercher ou coller un emoji",
+      "searchIcon": "Rechercher une icône",
+      "noMatch": "Aucun résultat.",
+      "textLabel": "Lettres ou chiffres",
+      "textPlaceholder": "PO",
+      "textHint": "Une ou deux lettres ou chiffres, affichés sur une petite pastille.",
+      "colour": "Couleur",
+      "colourEmoji": "Un emoji garde ses propres couleurs.",
+      "done": "Terminé",
+      "hint": "Affichée à côté du nom dans la barre latérale, pour que vous repériez la vue d’un coup d’œil."
+    },
     "visibleTitle": "Visible par tout le monde",
     "audience": {
       "me": "Vous seul la voyez dans votre barre latérale.",
@@ -103,6 +124,14 @@
     "create": "Créer la vue",
     "saved": "Vue enregistrée",
     "created": "Vue créée",
+    "duplicate": "Dupliquer",
+    "duplicateTitle": "Dupliquer la vue",
+    "copyName": "{{name}} (copie)",
+    "copyPersonal": {
+      "everyone": "Cette copie n’est visible que par vous, car seuls les admins créent des vues pour tout le monde.",
+      "team": "Cette copie n’est visible que par vous, car seuls les admins et les chefs d’équipe de {{team}} créent ses vues.",
+      "anyTeam": "Cette copie n’est visible que par vous, car seuls les admins et les chefs d’équipe créent les vues d’une équipe."
+    },
     "clear": "Effacer {{field}}",
     "allTickets": "Tous les tickets",
     "filters": {
@@ -336,23 +365,28 @@
       "condition": "Renseignez une valeur pour chaque condition, ou supprimez-la.",
       "actionValue": "Chaque action doit avoir une valeur.",
       "phrases": "Une liste compte de 1 à 100 expressions, une par ligne, de 500 caractères au plus chacune.",
-      "mergeTrigger": "La fusion dans le ticket ouvert du contact ne s’exécute qu’à la création d’un ticket."
+      "mergeTrigger": "La fusion dans le ticket ouvert du contact ne s’exécute qu’à la création d’un ticket.",
+      "callTrigger": "Les conditions d'appel demandent le déclencheur Un appel se termine."
     },
     "chooseSeverity": "Choisir une gravité",
     "noSeverity": "Aucune gravité",
-    "replyVariablesHint": "Les variables d’expéditeur, comme le nom de l’agent, sont vides dans les réponses automatiques."
+    "replyVariablesHint": "Les variables d’expéditeur, comme le nom de l’agent, sont vides dans les réponses automatiques.",
+    "chooseValue": "Choisir une valeur",
+    "chooseLine": "Choisir une ligne"
   },
   "triggers": {
     "ticket_created": "Un ticket est créé",
     "customer_replied": "Le client répond",
     "agent_replied": "Un agent répond",
-    "ticket_updated": "Un ticket est mis à jour"
+    "ticket_updated": "Un ticket est mis à jour",
+    "call_ended": "Un appel se termine"
   },
   "triggersShort": {
     "ticket_created": "Ticket créé",
     "customer_replied": "Réponse du client",
     "agent_replied": "Réponse d’un agent",
-    "ticket_updated": "Ticket mis à jour"
+    "ticket_updated": "Ticket mis à jour",
+    "call_ended": "Appel terminé"
   },
   "fields": {
     "subject": "Objet",
@@ -368,6 +402,12 @@
     "team_id": "Équipe",
     "brand_id": "Marque",
     "widget_id": "Widget de chat",
+    "call_outcome": "Issue de l'appel",
+    "call_direction": "Sens de l'appel",
+    "call_time": "Heure de l'appel",
+    "call_missed_reason": "Raison de l'appel manqué",
+    "call_line": "Ligne de l'appel",
+    "call_tag": "Étiquette de l'appel",
     "assignee_id": "Responsable"
   },
   "ops": {
@@ -733,6 +773,29 @@
         "closed": "Un jour de fermeture couvre toute la journée",
         "sla": "Seules les politiques en heures ouvrées sont suspendues"
       }
+    }
+  },
+  "callValues": {
+    "call_outcome": {
+      "missed": "Manqué",
+      "voicemail": "Messagerie vocale",
+      "answered": "Répondu"
+    },
+    "call_direction": {
+      "inbound": "Entrant",
+      "outbound": "Sortant"
+    },
+    "call_time": {
+      "outside_business_hours": "En dehors des horaires d'ouverture",
+      "business_hours": "Pendant les horaires d'ouverture"
+    },
+    "call_missed_reason": {
+      "out_of_opening_hours": "En dehors des horaires d'ouverture",
+      "short_abandoned": "Raccroché rapidement",
+      "abandoned_in_ivr": "Raccroché dans le menu",
+      "abandoned_in_classic": "Raccroché pendant l'attente",
+      "no_available_agent": "Aucun collègue disponible",
+      "agents_did_not_answer": "Personne n'a répondu"
     }
   }
 }

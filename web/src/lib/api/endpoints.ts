@@ -3,6 +3,7 @@
 import { http, stream, streamEvents, type StreamHandlers } from "./client";
 import type * as T from "./types";
 import { creatingTicket } from "../ownTickets";
+import { uiLanguage } from "@/i18n";
 
 type ListQuery = { limit?: number; cursor?: string | null };
 
@@ -425,6 +426,16 @@ export const api = {
       http.patch<T.Integration>(`/v1/integrations/${id}`, b),
     remove: (id: string) => http.del(`/v1/integrations/${id}`),
   },
+  phone: {
+    providers: () => http.get<{ data: T.PhoneProvider[] }>("/v1/phone/providers"),
+    connections: () => http.get<{ data: T.PhoneConnection[] }>("/v1/phone/connections"),
+    connect: (b: { provider: string; name?: string; credentials: Record<string, string> }) => http.create<T.PhoneConnection>("/v1/phone/connections", b),
+    update: (id: string, b: { name?: string; reuse_days?: number; assign_answered?: boolean; insight_cards?: boolean; credentials?: Record<string, string> }) =>
+      http.patch<T.PhoneConnection>(`/v1/phone/connections/${id}`, b),
+    test: (id: string) => http.post<T.PhoneConnection>(`/v1/phone/connections/${id}/test`),
+    disconnect: (id: string) => http.del(`/v1/phone/connections/${id}`),
+    lines: () => http.get<{ data: T.PhoneLine[] }>("/v1/phone/lines"),
+  },
   ticketPanels: {
     list: () => http.get<{ data: T.TicketPanel[] }>("/v1/ticket-panels"),
     /** An http panel answers its signing `secret`, shown once. */
@@ -477,7 +488,7 @@ export const api = {
     deliveries: (q?: ListQuery) => http.get<T.Page<T.SupportChannelDelivery>>("/v1/support-channels/deliveries", { query: q }),
     operations: () => http.get<T.SupportChannelOperations>("/v1/support-channels/operations"),
     retryDelivery: (eventSeq: number) => http.post<{ event_seq: number; status: "queued" }>(`/v1/support-channels/deliveries/${eventSeq}/retry`),
-    addDestination: (b: { connection_id: string; team_id?: string; external_channel_id: string; external_channel_name?: string; include_notes?: boolean; message_limit?: number }) =>
+    addDestination: (b: { connection_id: string; team_id?: string; priority?: "low" | "normal" | "high" | "urgent"; external_channel_id: string; external_channel_name?: string; include_notes?: boolean; message_limit?: number }) =>
       http.create<T.SupportChannelDestination>("/v1/support-channels/destinations", b),
     removeDestination: (id: string) => http.del(`/v1/support-channels/destinations/${id}`),
     linkCode: () => http.create<{ code: string; expires_at: string }>("/v1/me/support-channel-link-code", {}),
@@ -570,9 +581,12 @@ export const api = {
     render: (id: string, body_html: string, thread?: boolean) =>
       http.post<{ body_html: string }>(`/v1/tickets/${id}/render`, { body_html, thread: thread || undefined }),
     links: (id: string) => http.get<{ data: T.TicketLink[] }>(`/v1/tickets/${id}/links`),
-    /** What a ticket panel's product knows about the ticket's contact; `refresh` asks it again. */
+    /**
+     * What a ticket panel's product knows about the ticket's contact; `refresh` asks it again. An
+     * http panel's URL is told the app's language, so it can answer in it.
+     */
     panel: (id: string, panelId: string, refresh = false) =>
-      http.get<T.TicketPanelData>(`/v1/tickets/${id}/panels/${panelId}${refresh ? "?refresh=true" : ""}`),
+      http.get<T.TicketPanelData>(`/v1/tickets/${id}/panels/${panelId}`, { query: { refresh: refresh || undefined, locale: uiLanguage() } }),
     addLink: (id: string, b: { url: string; title?: string; integration_id?: string }) => http.create<T.TicketLink>(`/v1/tickets/${id}/links`, b),
     removeLink: (id: string, linkId: string) => http.del(`/v1/tickets/${id}/links/${linkId}`),
   },
@@ -611,7 +625,7 @@ export const api = {
     reorder: (entity: T.FieldEntity, ids: string[]) => http.post<T.Page<T.CustomField>>("/v1/custom-fields/reorder", { entity, ids }),
   },
   savedReplies: crud<T.SavedReply, { title: string; shortcut: string; body_html: string; team_id?: string | null }>("/v1/saved-replies"),
-  views: crud<T.View, { name: string; filters: T.TicketFilters; shared: boolean; position?: number; team_id?: string | null; section?: string | null }>("/v1/views"),
+  views: crud<T.View, { name: string; filters: T.TicketFilters; shared: boolean; position?: number; team_id?: string | null; section?: string | null; icon?: T.ViewIcon | null }>("/v1/views"),
   slaPolicies: crud<T.SlaPolicy, Omit<T.SlaPolicy, "id" | "business_hours"> & { business_hours?: boolean }>("/v1/sla-policies"),
   automations: crud<T.Automation, Omit<T.Automation, "id" | "run_count">>("/v1/automations"),
   kb: {

@@ -283,7 +283,8 @@ export type TicketStatus = "open" | "pending" | "on_hold" | "solved" | "closed";
 export type Priority = "low" | "normal" | "high" | "urgent";
 /** Business impact; sev1 is the most severe. A ticket may have none. */
 export type Severity = "sev1" | "sev2" | "sev3" | "sev4";
-export type Channel = "email" | "chat" | "api" | "portal";
+/** phone: a ticket a call opened (contracts/phone.md). */
+export type Channel = "email" | "chat" | "api" | "portal" | "phone";
 // Labels ("tags" in the API) and custom fields (contracts/api.md "Labels and custom fields").
 export type LabelColor =
   | "gray" | "red" | "orange" | "amber" | "yellow" | "lime" | "green" | "teal" | "cyan" | "blue" | "indigo" | "violet" | "purple" | "pink" | "rose";
@@ -377,6 +378,7 @@ export type TicketSla = {
 export type Ticket = {
   id: string;
   number: number;
+  alias?: string | null;
   subject: string;
   status: TicketStatus;
   priority: Priority;
@@ -519,7 +521,46 @@ export type ActivityType =
   | "field_changed"
   /** data: {from, to}, each {id, name} (name, else email) or null. */
   | "contact_changed"
+  /** data: CallData. Updated in place (activity.updated) as the call moves on. */
+  | "call"
   | (string & {});
+
+/** A call entry's data (contracts/phone.md "Timeline"). */
+export type CallData = {
+  call_id: string;
+  provider: string;
+  direction: "inbound" | "outbound";
+  stage: "ringing" | "answered" | "ended";
+  /** Set once the call ended. */
+  outcome: "" | "answered" | "missed" | "voicemail";
+  /** The provider's own reason (out_of_opening_hours, no_available_agent, ...). */
+  missed_reason: string;
+  /** E.164, "" when withheld. */
+  number: string;
+  line: string;
+  line_id: string;
+  caller_name: string;
+  /** The member who took or made the call, when the provider's user has their email. */
+  agent: UserRef | null;
+  agent_name: string;
+  started_at: string | null;
+  answered_at: string | null;
+  ended_at: string | null;
+  duration: number;
+  recording: boolean;
+  voicemail: boolean;
+  /** The provider's lasting page for the recording or voicemail, also "Open in" the provider. */
+  asset_url: string;
+  /** Direct links, working until links_expire_at. */
+  recording_url: string;
+  voicemail_url: string;
+  links_expire_at: string | null;
+  tags: string[];
+  comments: { id: string; text: string; author?: string; at?: string }[];
+  summary: string;
+  transcript: string;
+  outside_hours: boolean;
+};
 export type Activity = {
   id: string;
   ticket_id: string;
@@ -573,7 +614,9 @@ export type TicketFilters = {
   /** Custom field filters, ANDed (max 20). */
   fields?: FieldFilter[];
 };
-export type View = { id: string; name: string; shared: boolean; filters: TicketFilters; position: number; /** Shared with this team. */ team_id?: string | null; /** The sidebar heading it shows under (lib/viewSections). */ section?: string | null };
+export type View = { id: string; name: string; shared: boolean; filters: TicketFilters; position: number; /** Shared with this team. */ team_id?: string | null; /** The sidebar heading it shows under (lib/viewSections). */ section?: string | null; /** What the sidebar shows beside the name; none shows the layers icon. */ icon?: ViewIcon | null };
+/** emoji: one emoji; icon: a name of the app's list (viewIcons.ts); text: one or two letters or digits. `color` tints an icon or text (a Tone), never an emoji. */
+export type ViewIcon = { kind: "emoji" | "icon" | "text"; value: string; color: string | null };
 export type SlaPolicy = {
   id: string;
   name: string;
@@ -668,11 +711,14 @@ export type AIClientConnection = {
   last_used_at: string | null;
 };
 
-export type AutomationTrigger = "ticket_created" | "customer_replied" | "agent_replied" | "ticket_updated";
+/** call_ended: a phone call reached its final state (contracts/phone.md). */
+export type AutomationTrigger = "ticket_created" | "customer_replied" | "agent_replied" | "ticket_updated" | "call_ended";
 export type ConditionField =
   | "subject" | "body" | "from_email" | "channel" | "mailbox_id" | "priority" | "severity" | "status" | "tag" | "sentiment" | "ai_decide"
   /** contracts/teams.md: equals/not_equals with an id (team and widget also "none"); received_at also contains. */
   | "assignee_id" | "team_id" | "brand_id" | "widget_id" | "received_at"
+  /** The call of a call_ended automation (contracts/phone.md "Automations"). */
+  | "call_outcome" | "call_direction" | "call_missed_reason" | "call_time" | "call_line" | "call_tag"
   /** A ticket custom field, or the ticket contact's. */
   | `field.${string}` | `contact.field.${string}`;
 /** `eq` is the AI sentiment condition's operator (contracts/ai.md). `any` and `none` on subject, body, from_email,
@@ -1027,6 +1073,31 @@ export type SupportChannelProvider = {
   fields: { name: string; label: string; secret: boolean; generated?: boolean; discovered?: boolean; help?: string }[];
 };
 export type SupportChannelAccount = { id: string; name: string };
+
+/** contracts/phone.md. */
+export type PhoneProvider = { key: string; name: string; fields: { name: string; label: string; secret: boolean }[] };
+export type PhoneHealthCode = "" | "receiving" | "webhook_missing" | "credentials_refused" | "provider_unreachable";
+export type PhoneConnection = {
+  id: string;
+  provider: string;
+  name: string;
+  account_name: string;
+  status: "connected" | "error";
+  last_error: string;
+  health_status: "unknown" | "healthy" | "action_required" | "error";
+  health_code: PhoneHealthCode;
+  health_detail: string;
+  health_checked_at: string | null;
+  /** A call goes on the caller's latest ticket solved within this many days; 0 opens a new one. */
+  reuse_days: number;
+  assign_answered: boolean;
+  insight_cards: boolean;
+  last_event_at: string | null;
+  /** Where the provider sends events: admins only. */
+  webhook_url?: string;
+  created_at: string;
+};
+export type PhoneLine = { id: string; name: string; provider: string };
 export type SupportChannelConnection = {
   id: string;
   provider: string;
@@ -1055,6 +1126,7 @@ export type SupportChannelDestination = {
   id: string;
   connection_id: string;
   team_id: string | null;
+  priority: "low" | "normal" | "high" | "urgent" | null;
   external_channel_id: string;
   external_channel_name: string;
   enabled: boolean;
@@ -1604,6 +1676,8 @@ export type CsatSurvey = {
 
 export type TicketPatch = {
   subject?: string;
+  /** Optional workspace-unique reference; null clears it. */
+  alias?: string | null;
   status?: TicketStatus;
   priority?: Priority;
   /** null clears. */
@@ -2458,6 +2532,8 @@ export type MailCategorySettings = {
   /** Admins: every team with its own; others: their own teams'. The first in position order the owner is in decides. */
   teams: (MailCategorySet & { team_id: string; team_name: string; position: number })[];
   presets: MailCategory[];
+  /** The fixed categories available when syncing a Google account. */
+  gmail_categories: MailCategory[];
   /** ai: Ollie sorts new mail; rules: sender rules and headers only. */
   sorting: "ai" | "rules";
   /** Ollie can suggest categories. */
@@ -2471,7 +2547,10 @@ export type MailAccountCategories = {
   source: "account" | "team" | "workspace" | "none";
   team: { id: string; name: string } | null;
   /** The account's own choice. */
-  mode: "follow" | "custom" | "off";
+  mode: "follow" | "custom" | "off" | "gmail";
+  /** The effective category authority after workspace policy. */
+  engine: "off" | "local" | "gmail";
+  sync_status?: "refreshing" | "pending" | "failed" | "ready";
   /** Its own categories, kept while it follows. */
   own: MailCategory[];
   /** Ollie may sort its new mail. */
@@ -2772,7 +2851,7 @@ export type CollabStatus = {
 };
 
 export type SidebarSectionId = "favorites" | "mail" | "inbox" | "teams" | "views" | "workspace";
-export type SidebarPinKind = "box" | "folder" | "account" | "view" | "team" | "ticket_folder";
+export type SidebarPinKind = "box" | "folder" | "account" | "view" | "team" | "ticket_folder" | "view_section";
 export type SidebarPin = { kind: SidebarPinKind; id: string };
 
 export type SidebarPrefs = {

@@ -43,6 +43,7 @@ import {
   type TeamKey,
 } from "./content";
 import { contactRef, db, defaultRouting, userRef, type WsData } from "./db";
+import { seedPhone } from "./phone";
 import { brandLogo, logoMark, portrait } from "./avatars";
 import { teammatePresence, type Meta } from "./gateway";
 import { seedDefaultLabels } from "./labels";
@@ -132,6 +133,7 @@ export function baseWorkspace(id: string, name: string, slug: string): WsData {
     threads: [],
     originals: {},
     activities: [],
+    phone: [],
     tags: [],
     tagGroups: [],
     customFields: [],
@@ -1144,10 +1146,10 @@ function seedMargin(): WsData {
   );
   // Escalations is a section (contracts/api.md, /v1/views): its views fold together in the sidebar.
   ws.views = [
-    { id: uuid(), name: "Urgent", shared: true, filters: { status: ["open", "pending"], priority: ["urgent", "high"] }, position: 0 },
-    { id: uuid(), name: "Billing queue", shared: false, team_id: teamId("Billing"), filters: { status: ["open", "pending", "on_hold"], team_id: teamId("Billing")! }, position: 1 },
-    { id: uuid(), name: "Waiting on engineering", shared: false, section: "Escalations", filters: { status: ["on_hold", "pending"], tag: "Bug" }, position: 2 },
-    { id: uuid(), name: "Legal requests due", shared: false, team_id: teamId("Legal"), section: "Escalations", filters: { status: ["open", "pending"], team_id: teamId("Legal")! }, position: 3 },
+    { id: uuid(), name: "Urgent", shared: true, filters: { status: ["open", "pending"], priority: ["urgent", "high"] }, position: 0, icon: { kind: "emoji", value: "🔥", color: null } },
+    { id: uuid(), name: "Billing queue", shared: false, team_id: teamId("Billing"), filters: { status: ["open", "pending", "on_hold"], team_id: teamId("Billing")! }, position: 1, icon: { kind: "icon", value: "credit-card", color: "teal" } },
+    { id: uuid(), name: "Waiting on engineering", section: "Escalations", shared: false, filters: { status: ["on_hold", "pending"], tag: "Bug" }, position: 2, icon: { kind: "text", value: "EN", color: "violet" } },
+    { id: uuid(), name: "Legal requests due", section: "Escalations", shared: false, team_id: teamId("Legal"), filters: { status: ["open", "pending"], team_id: teamId("Legal")! }, position: 3 },
   ];
   const tagName = (n: string) => n;
   const autos: Automation[] = [
@@ -1403,6 +1405,7 @@ function seedMargin(): WsData {
 
   seedTicketTypes(ws);
   seedMarginFields(ws, { maya: uid("maya"), jonas: uid("jonas"), lea: uid("lea"), priya: uid("priya") });
+  seedPhone(ws, userRef(uid("jonas"))!);
   return ws;
 }
 

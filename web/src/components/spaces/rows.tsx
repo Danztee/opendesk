@@ -13,6 +13,7 @@ import { ActivePill, Count, Label, NavTip, rowActive, rowBase, rowIdle, rowShape
 import { AccountTags } from "@/components/collab/AccountTags";
 import { AccountDot, boxIcon, FolderGlyph } from "@/components/collab/bits";
 import { TeamDot } from "@/components/tickets/teams";
+import { ViewIcon, viewName } from "@/components/tickets/ViewIcon";
 import { Tooltip } from "@/components/ui/tooltip";
 import { WorkspaceBadge } from "@/components/workspaces/WorkspaceBadge";
 import type { WaitingScope } from "@/components/tickets/useUrgentChats";
@@ -248,8 +249,8 @@ export function buildRow(item: { kind: string; id: string }, d: WorkspaceData, c
       const key = hid.view(v.id);
       return {
         key,
-        label: v.name,
-        icon: <Layers />,
+        label: viewName(v),
+        icon: <ViewIcon icon={v.icon} />,
         badge: { kind: "ticket", sections: [...via, "views"], nums: ticketRowNumbers(d.counts, key) },
         link: { kind: "view", viewId: v.id },
         waiting: ctx.waiting?.({ kind: "view", id: v.id }),
@@ -437,6 +438,7 @@ export function NavItemRow({
   ws,
   mark,
   menu,
+  nested,
 }: {
   model: RowModel;
   rail: boolean;
@@ -450,6 +452,8 @@ export function NavItemRow({
   ws?: string;
   mark?: ReactNode;
   menu?: (row: ReactElement) => ReactElement;
+  /** Indented under a view section's header (app/ViewSectionGroup.tsx). */
+  nested?: boolean;
 }) {
   const { t } = useTranslation("shell");
   const name = label || model.label;
@@ -458,7 +462,7 @@ export function NavItemRow({
   const count = n !== undefined && (model.badge?.kind === "ticket" || n > 0) ? n : undefined;
   const dot = rail && (model.railDot === "unread" ? choice !== "none" && !!model.badge?.nums.unread : model.railDot === "count" ? (n ?? 0) > 0 : false);
   const link = (
-    <RowAnchor link={model.link} ws={ws} active={model.active} className={cn(rowBase, rowShape(rail), rowIdle)} label={rail ? name : undefined} title={rail ? undefined : (model.title ?? (label ? model.label : undefined))}>
+    <RowAnchor link={model.link} ws={ws} active={model.active} className={cn(rowBase, rowShape(rail), rowIdle, nested && "pl-[22px]")} label={rail ? name : undefined} title={rail ? undefined : (model.title ?? (label ? model.label : undefined))}>
       {(active) => (
         <>
           {active && <ActivePill />}

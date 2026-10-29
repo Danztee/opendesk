@@ -93,6 +93,8 @@ const (
 	// TriggerThreadReplied: someone outside the team answered a third-party thread.
 	TriggerThreadReplied = "thread_replied"
 	TriggerTicketUpdated = "ticket_updated"
+	// TriggerCallEnded: a phone call reached its final state (contracts/phone.md).
+	TriggerCallEnded = "call_ended"
 )
 
 // TicketTriggerArgs runs SLA assignment, automations, auto-assignment and notifications
@@ -104,6 +106,8 @@ type TicketTriggerArgs struct {
 	MessageID   *uuid.UUID `json:"message_id,omitempty"`
 	ActorUserID *uuid.UUID `json:"actor_user_id,omitempty"`
 	Changes     []string   `json:"changes,omitempty"`
+	// CallID is the phone call a call_ended trigger is about (phone_calls.id).
+	CallID *uuid.UUID `json:"call_id,omitempty"`
 }
 
 func (TicketTriggerArgs) Kind() string { return "helpdesk.ticket_trigger" }
@@ -140,6 +144,30 @@ type SupportChannelInboundArgs struct {
 }
 
 func (SupportChannelInboundArgs) Kind() string { return "support_channels.inbound" }
+
+// PhoneInboundArgs applies one verified, deduplicated phone provider event
+// (phone_inbound_events) to its call. Owner: phone.
+type PhoneInboundArgs struct {
+	WorkspaceID     uuid.UUID `json:"workspace_id"`
+	ConnectionID    uuid.UUID `json:"connection_id"`
+	ExternalEventID string    `json:"external_event_id"`
+}
+
+func (PhoneInboundArgs) Kind() string { return "phone.inbound" }
+
+// PhoneInsightCardArgs shows a ringing call's caller and tickets in the provider's app.
+// Owner: phone.
+type PhoneInsightCardArgs struct {
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+	CallID      uuid.UUID `json:"call_id"`
+}
+
+func (PhoneInsightCardArgs) Kind() string { return "phone.insight_card" }
+
+// PhonePruneArgs removes processed phone provider events older than a week. Owner: phone.
+type PhonePruneArgs struct{}
+
+func (PhonePruneArgs) Kind() string { return "phone.prune" }
 
 // SupportChannelHealthAlertArgs finds provider connections that have stayed unhealthy.
 // Owner: supportchannels.
@@ -381,11 +409,12 @@ func (CollabSyncArgs) Kind() string { return "collab.sync_account" }
 // CollabApplyArgs makes an action already applied in opendesk at the provider
 // (contracts/collab.md "Actions"). Owner: collab.
 type CollabApplyArgs struct {
-	WorkspaceID uuid.UUID   `json:"workspace_id"`
-	AccountID   uuid.UUID   `json:"account_id"`
-	ThreadIDs   []uuid.UUID `json:"thread_ids"`
-	Action      string      `json:"action"`
-	FolderID    *uuid.UUID  `json:"folder_id,omitempty"`
+	WorkspaceID      uuid.UUID   `json:"workspace_id"`
+	AccountID        uuid.UUID   `json:"account_id"`
+	ThreadIDs        []uuid.UUID `json:"thread_ids"`
+	Action           string      `json:"action"`
+	FolderID         *uuid.UUID  `json:"folder_id,omitempty"`
+	CategoryIntentID *uuid.UUID  `json:"category_intent_id,omitempty"`
 }
 
 func (CollabApplyArgs) Kind() string { return "collab.apply" }

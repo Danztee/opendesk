@@ -88,6 +88,27 @@
     "reorderSectionAria": "Abschnitt {{name}} neu anordnen. Halte Alt gedrückt und bewege ihn mit seinen Ansichten über die Pfeiltasten.",
     "sectionChars": "Ein Abschnittsname darf weder < noch > enthalten.",
     "needName": "Gib der Ansicht einen Namen.",
+    "icon": {
+      "label": "Symbol",
+      "change": "Ändern",
+      "preview": "In der Seitenleiste",
+      "none": "Keins",
+      "tabs": {
+        "emoji": "Emoji",
+        "icon": "Symbol",
+        "text": "Text"
+      },
+      "searchEmoji": "Emoji suchen oder einfügen",
+      "searchIcon": "Symbole suchen",
+      "noMatch": "Nichts gefunden.",
+      "textLabel": "Buchstaben oder Ziffern",
+      "textPlaceholder": "PO",
+      "textHint": "Ein oder zwei Buchstaben oder Ziffern auf einer kleinen Kachel.",
+      "colour": "Farbe",
+      "colourEmoji": "Ein Emoji behält seine eigenen Farben.",
+      "done": "Fertig",
+      "hint": "Steht in der Seitenleiste neben dem Namen, damit du die Ansicht sofort findest."
+    },
     "visibleTitle": "Für alle sichtbar",
     "audience": {
       "me": "Nur du siehst sie in deiner Seitenleiste.",
@@ -101,6 +122,14 @@
     "create": "Ansicht erstellen",
     "saved": "Ansicht gespeichert",
     "created": "Ansicht erstellt",
+    "duplicate": "Duplizieren",
+    "duplicateTitle": "Ansicht duplizieren",
+    "copyName": "{{name}} (Kopie)",
+    "copyPersonal": {
+      "everyone": "Diese Kopie siehst nur du, denn Ansichten für alle erstellen nur Admins.",
+      "team": "Diese Kopie siehst nur du, denn die Ansichten von {{team}} erstellen nur Admins und die Leitung des Teams.",
+      "anyTeam": "Diese Kopie siehst nur du, denn die Ansichten eines Teams erstellen nur Admins und seine Leitung."
+    },
     "clear": "{{field}} leeren",
     "allTickets": "Alle Tickets",
     "filters": {
@@ -314,23 +343,28 @@
       "condition": "Jede Bedingung braucht einen Wert, oder entferne sie.",
       "actionValue": "Jede Aktion braucht einen Wert.",
       "phrases": "Eine Liste enthält 1 bis 100 Begriffe, einen pro Zeile, mit je höchstens 500 Zeichen.",
-      "mergeTrigger": "Das Zusammenführen mit dem offenen Ticket des Kontakts läuft nur, wenn ein Ticket erstellt wird."
+      "mergeTrigger": "Das Zusammenführen mit dem offenen Ticket des Kontakts läuft nur, wenn ein Ticket erstellt wird.",
+      "callTrigger": "Anrufbedingungen brauchen den Auslöser Ein Anruf endet."
     },
     "chooseSeverity": "Schweregrad wählen",
     "noSeverity": "Kein Schweregrad",
-    "replyVariablesHint": "Absender-Variablen wie der Name des Agenten sind in automatischen Antworten leer."
+    "replyVariablesHint": "Absender-Variablen wie der Name des Agenten sind in automatischen Antworten leer.",
+    "chooseValue": "Wert wählen",
+    "chooseLine": "Leitung wählen"
   },
   "triggers": {
     "ticket_created": "Ein Ticket wird erstellt",
     "customer_replied": "Der Kunde antwortet",
     "agent_replied": "Ein Agent antwortet",
-    "ticket_updated": "Ein Ticket wird aktualisiert"
+    "ticket_updated": "Ein Ticket wird aktualisiert",
+    "call_ended": "Ein Anruf endet"
   },
   "triggersShort": {
     "ticket_created": "Ticket erstellt",
     "customer_replied": "Kunde hat geantwortet",
     "agent_replied": "Agent hat geantwortet",
-    "ticket_updated": "Ticket aktualisiert"
+    "ticket_updated": "Ticket aktualisiert",
+    "call_ended": "Anruf beendet"
   },
   "fields": {
     "subject": "Betreff",
@@ -346,7 +380,13 @@
     "team_id": "Team",
     "brand_id": "Marke",
     "widget_id": "Chat-Widget",
-    "assignee_id": "Zuständig"
+    "assignee_id": "Zuständig",
+    "call_outcome": "Ergebnis des Anrufs",
+    "call_direction": "Richtung des Anrufs",
+    "call_time": "Zeit des Anrufs",
+    "call_missed_reason": "Grund des verpassten Anrufs",
+    "call_line": "Leitung des Anrufs",
+    "call_tag": "Label des Anrufs"
   },
   "ops": {
     "contains": "enthält",
@@ -706,6 +746,29 @@
         "closed": "An einem Feiertag ist den ganzen Tag geschlossen",
         "sla": "Nur Richtlinien, die Geschäftszeiten zählen, pausieren"
       }
+    }
+  },
+  "callValues": {
+    "call_outcome": {
+      "missed": "Verpasst",
+      "voicemail": "Mailbox",
+      "answered": "Angenommen"
+    },
+    "call_direction": {
+      "inbound": "Eingehend",
+      "outbound": "Ausgehend"
+    },
+    "call_time": {
+      "outside_business_hours": "Außerhalb der Geschäftszeiten",
+      "business_hours": "Während der Geschäftszeiten"
+    },
+    "call_missed_reason": {
+      "out_of_opening_hours": "Außerhalb der Öffnungszeiten",
+      "short_abandoned": "Schnell aufgelegt",
+      "abandoned_in_ivr": "Im Menü aufgelegt",
+      "abandoned_in_classic": "In der Warteschleife aufgelegt",
+      "no_available_agent": "Niemand verfügbar",
+      "agents_did_not_answer": "Niemand hat abgenommen"
     }
   }
 }
