@@ -193,9 +193,31 @@ func registerSkills(d *deps.Deps, api huma.API) {
 		if err != nil {
 			return nil, err
 		}
+		members := make([]uuid.UUID, 0, len(in.Body.MemberIDs))
+		for _, raw := range in.Body.MemberIDs {
+			mid, err := uuid.Parse(strings.TrimSpace(raw))
+			if err != nil || slices.Contains(members, mid) {
+				return nil, httpx.Validation("member_ids must contain unique valid member ids")
+			}
+			members = append(members, mid)
+		}
+		slices.SortFunc(members, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
 		var s Skill
 		err = d.DB.Tx(ctx, func(tx pgx.Tx) error {
-			var err error
+			// Account writers publish workspace events after changing the account.
+			// Lock accounts first, then the workspace, skill and memberships.
+			rows, err := tx.Query(ctx, `SELECT u.id FROM users u JOIN members m ON m.user_id=u.id
+				WHERE m.workspace_id=$1 AND u.id=ANY($2::uuid[]) ORDER BY u.id FOR SHARE OF u`, p.WorkspaceID, members)
+			if err != nil {
+				return err
+			}
+			locked, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+			if err != nil {
+				return err
+			}
+			if len(locked) != len(members) {
+				return httpx.Validation("Skills require an active owner, admin or agent in this workspace.")
+			}
 			s, err = lockSkill(ctx, tx, p.WorkspaceID, id)
 			if err != nil {
 				return err
@@ -203,15 +225,6 @@ func registerSkills(d *deps.Deps, api huma.API) {
 			if s.Archived {
 				return httpx.Conflict("Restore this skill before changing its members.")
 			}
-			members := make([]uuid.UUID, 0, len(in.Body.MemberIDs))
-			for _, raw := range in.Body.MemberIDs {
-				mid, err := uuid.Parse(strings.TrimSpace(raw))
-				if err != nil || slices.Contains(members, mid) {
-					return httpx.Validation("member_ids must contain unique valid member ids")
-				}
-				members = append(members, mid)
-			}
-			slices.SortFunc(members, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
 			for _, mid := range members {
 				var eligible bool
 				err = tx.QueryRow(ctx, `SELECT m.role IN ('owner','admin','agent') AND u.suspended_at IS NULL FROM members m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=$1 AND m.user_id=$2 FOR SHARE OF m,u`, p.WorkspaceID, mid).Scan(&eligible)
