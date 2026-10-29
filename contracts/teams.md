@@ -500,6 +500,14 @@ Brands, widgets and help center domains are not limited by plan (contracts/billi
 members). At most 50 brands, 50 widgets per brand, 200 teams and 200 routing rules per workspace
 (`422 limit_reached`).
 
+### Customer portal
+
+Customer portal credentials identify a contact in one workspace, separately from
+members and widget visitors. They grant access only to that contact's own tickets
+through customer portal operations, including when the ticket has a private team.
+The customer projection exposes public conversation content only. It never grants
+team membership or access to agent APIs, internal notes, activities or team metadata.
+
 ## Skills
 
 Skills are workspace settings used for agent expertise. A `Skill` is
