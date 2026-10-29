@@ -840,8 +840,8 @@ type candidate struct {
 func PickAssignee(ctx context.Context, tx pgx.Tx, wid uuid.UUID, team *uuid.UUID, mode string, requiredSkillIDs []uuid.UUID) (*uuid.UUID, error) {
 	// Member-skill replacement takes the workspace lock before locking a skill and
 	// replacing its relations. Take that same first lock before any eligibility or
-	// cursor lock so a removal cannot form a cycle with the assignment event write.
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, wid); err != nil {
+	// cursor lock so replacement cannot form a cycle with the assignment event write.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR NO KEY UPDATE`, wid); err != nil {
 		return nil, err
 	}
 	requiredSkillIDs = slices.Clone(requiredSkillIDs)
@@ -878,10 +878,12 @@ func PickAssignee(ctx context.Context, tx pgx.Tx, wid uuid.UUID, team *uuid.UUID
 		return nil, err
 	}
 	if len(requiredSkillIDs) > 0 {
+		// A member deletion can hold a relation before publishing its workspace event.
+		// Skip busy relations so assignment never waits in the reverse order.
 		eligible := make([]candidate, 0, len(cands))
 		for _, c := range cands {
 			rows, err := tx.Query(ctx, `SELECT skill_id FROM member_skills
-				WHERE workspace_id = $1 AND user_id = $2 AND skill_id = ANY($3::uuid[]) FOR KEY SHARE`, wid, c.ID, requiredSkillIDs)
+				WHERE workspace_id = $1 AND user_id = $2 AND skill_id = ANY($3::uuid[]) FOR KEY SHARE SKIP LOCKED`, wid, c.ID, requiredSkillIDs)
 			if err != nil {
 				return nil, err
 			}

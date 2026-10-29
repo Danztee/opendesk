@@ -446,9 +446,6 @@ func (s *svc) purgeFiles(keys []string) {
 // deleteWorkspace removes a workspace and everything it owns. It returns the members
 // to disconnect and the stored files to purge.
 func (s *svc) deleteWorkspace(ctx context.Context, tx pgx.Tx, wid uuid.UUID) ([]uuid.UUID, []string, error) {
-	if err := lockMemberWorkspace(ctx, tx, wid); err != nil {
-		return nil, nil, err
-	}
 	rows, err := tx.Query(ctx, `SELECT user_id FROM members WHERE workspace_id = $1`, wid)
 	if err != nil {
 		return nil, nil, err
@@ -659,9 +656,6 @@ func (s *svc) registerWorkspaces(api huma.API) {
 			}
 			var m CoreMember
 			err = s.tx(ctx, func(tx pgx.Tx) error {
-				if err := lockMemberWorkspace(ctx, tx, p.WorkspaceID); err != nil {
-					return err
-				}
 				var role string
 				if err := tx.QueryRow(ctx, `SELECT role FROM members WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE`,
 					p.WorkspaceID, in.Body.UserID).Scan(&role); err != nil {

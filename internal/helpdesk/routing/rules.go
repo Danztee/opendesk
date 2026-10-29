@@ -89,7 +89,7 @@ func scanRule(row pgx.Row) (RoutingRule, error) {
 func loadRule(ctx context.Context, q db.Querier, wid, id uuid.UUID, lock bool) (RoutingRule, error) {
 	sql := ruleSelect + ` WHERE r.workspace_id = $1 AND r.id = $2`
 	if lock {
-		sql += ` FOR UPDATE`
+		sql += ` FOR UPDATE NOWAIT`
 	}
 	return scanRule(q.QueryRow(ctx, sql, wid, id))
 }
@@ -115,7 +115,7 @@ func normalizeSkillIDs(raw []string) ([]uuid.UUID, error) {
 // validateRuleSkillIDs locks the workspace, then referenced skills in ID order. This
 // matches catalog writes, so archiving and rule edits cannot deadlock or race.
 func validateRuleSkillIDs(ctx context.Context, tx pgx.Tx, wid uuid.UUID, ids []uuid.UUID) error {
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, wid); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR NO KEY UPDATE`, wid); err != nil {
 		return err
 	}
 	for _, id := range ids {

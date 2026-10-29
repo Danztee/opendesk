@@ -75,7 +75,10 @@ func (b routingRuleBody) apply(ctx context.Context, tx pgx.Tx, wid uuid.UUID, r 
 		return httpx.Validation("team_id is required")
 	}
 	if b.TeamID != nil {
-		if err := checkRow(ctx, tx, wid, "teams", r.TeamID, "team"); err != nil {
+		var team uuid.UUID
+		if err := tx.QueryRow(ctx, `SELECT id FROM teams WHERE workspace_id=$1 AND id=$2 FOR KEY SHARE NOWAIT`, wid, r.TeamID).Scan(&team); db.IsNotFound(err) {
+			return httpx.Validation("team is not in this workspace")
+		} else if err != nil {
 			return err
 		}
 	}
@@ -137,9 +140,9 @@ func Register(d *deps.Deps, api huma.API) {
 				return nil, httpx.Wrap(err)
 			}
 			r := RoutingRule{ID: ids.New(), Enabled: true, Match: MatchAll, SkillIDs: []uuid.UUID{}}
-			err = d.DB.Tx(ctx, func(tx pgx.Tx) error {
+			err = retryRoutingWrite(ctx, d.DB, func(tx pgx.Tx) error {
 				// One writer at a time per workspace keeps the limit and positions exact.
-				if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, p.WorkspaceID); err != nil {
+				if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR NO KEY UPDATE`, p.WorkspaceID); err != nil {
 					return err
 				}
 				var n int
@@ -205,9 +208,9 @@ func Register(d *deps.Deps, api huma.API) {
 				return nil, err
 			}
 			var r RoutingRule
-			err = d.DB.Tx(ctx, func(tx pgx.Tx) error {
+			err = retryRoutingWrite(ctx, d.DB, func(tx pgx.Tx) error {
 				var err error
-				if _, err = tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, p.WorkspaceID); err != nil {
+				if _, err = tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR NO KEY UPDATE`, p.WorkspaceID); err != nil {
 					return err
 				}
 				r, err = loadRule(ctx, tx, p.WorkspaceID, id, true)
@@ -250,11 +253,14 @@ func Register(d *deps.Deps, api huma.API) {
 			if err != nil {
 				return nil, err
 			}
-			err = d.DB.Tx(ctx, func(tx pgx.Tx) error {
-				if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, p.WorkspaceID); err != nil {
+			err = retryRoutingWrite(ctx, d.DB, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR NO KEY UPDATE`, p.WorkspaceID); err != nil {
 					return err
 				}
 				var name string
+				if _, err := loadRule(ctx, tx, p.WorkspaceID, id, true); err != nil {
+					return err
+				}
 				err := tx.QueryRow(ctx, `DELETE FROM routing_rules WHERE workspace_id = $1 AND id = $2 RETURNING name`, p.WorkspaceID, id).Scan(&name)
 				if db.IsNotFound(err) {
 					return httpx.NotFound("Routing rule")
@@ -282,7 +288,7 @@ func Register(d *deps.Deps, api huma.API) {
 				return nil, httpx.Wrap(err)
 			}
 			var out []RoutingRule
-			err = d.DB.Tx(ctx, func(tx pgx.Tx) error {
+			err = retryRoutingWrite(ctx, d.DB, func(tx pgx.Tx) error {
 				list, err := reorder(ctx, tx, p, in.Body.IDs)
 				out = list
 				return err
@@ -323,10 +329,10 @@ func reorder(ctx context.Context, tx pgx.Tx, p *auth.Principal, raw []string) ([
 		}
 		order = append(order, id)
 	}
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, p.WorkspaceID); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR NO KEY UPDATE`, p.WorkspaceID); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, ruleSelect+` WHERE r.workspace_id = $1 ORDER BY r.position, r.created_at, r.id FOR UPDATE`, p.WorkspaceID)
+	rows, err := tx.Query(ctx, ruleSelect+` WHERE r.workspace_id = $1 ORDER BY r.position, r.created_at, r.id FOR UPDATE NOWAIT`, p.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}

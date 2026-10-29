@@ -59,3 +59,51 @@ func TestRuleWritesWaitBeforeLockingRules(t *testing.T) {
 		})
 	}
 }
+
+func TestRuleWritesReleaseWorkspaceForRuleOwner(t *testing.T) {
+	for _, method := range []string{"PATCH", "DELETE", "reorder"} {
+		t.Run(method, func(t *testing.T) {
+			w := newWorld(t)
+			e := w.e
+			a, b := ids.New(), ids.New()
+			e.Exec(`INSERT INTO routing_rules(id,workspace_id,name,team_id,position,conditions) VALUES($1,$3,'A',$4,0,'[{"field":"subject","op":"contains","value":"x"}]'),($2,$3,'B',$4,1,'[{"field":"subject","op":"contains","value":"x"}]')`, a, b, w.ws.ID, w.support)
+			gate, err := e.D.DB.Pool.Begin(e.Ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer gate.Rollback(e.Ctx)
+			if _, err := gate.Exec(e.Ctx, `SELECT 1 FROM routing_rules WHERE workspace_id=$1 AND id=$2 FOR UPDATE`, w.ws.ID, a); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan *hdtest.Resp, 1)
+			go func() {
+				if method == "reorder" {
+					done <- e.Do("POST", "/v1/routing-rules/reorder", w.admin(), map[string]any{"ids": []string{b.String(), a.String()}})
+				} else {
+					done <- e.Do(method, "/v1/routing-rules/"+a.String(), w.admin(), map[string]any{"name": "Edited"})
+				}
+			}()
+			select {
+			case r := <-done:
+				r.Want(t, 409)
+			case <-time.After(5 * time.Second):
+				gate.Rollback(e.Ctx)
+				(<-done).Want(t, 409)
+				t.Fatal("routing writer waited for a dependency while retaining the workspace")
+			}
+			if _, err := gate.Exec(e.Ctx, `SELECT 1 FROM workspaces WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, w.ws.ID); err != nil {
+				t.Fatal(err)
+			}
+			gate.Rollback(e.Ctx)
+			if method == "reorder" {
+				e.Do("POST", "/v1/routing-rules/reorder", w.admin(), map[string]any{"ids": []string{b.String(), a.String()}}).Want(t, 200)
+			} else {
+				want := 200
+				if method == "DELETE" {
+					want = 204
+				}
+				e.Do(method, "/v1/routing-rules/"+a.String(), w.admin(), map[string]any{"name": "Edited"}).Want(t, want)
+			}
+		})
+	}
+}

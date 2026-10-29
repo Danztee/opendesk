@@ -1,6 +1,7 @@
 package tickets_test
 
 import (
+	"context"
 	"encoding/json"
 	"regexp"
 	"slices"
@@ -809,4 +810,47 @@ func mustLoc(name string) *time.Location {
 		panic(err)
 	}
 	return l
+}
+
+func TestSkillAssignmentSkipsBusyRemoval(t *testing.T) {
+	e, ws := newEnv(t)
+	team := addTeam(t, e, ws, ws.Agent.ID)
+	skill := ids.New()
+	e.Exec(`INSERT INTO skills(id,workspace_id,name) VALUES($1,$2,'French')`, skill, ws.ID)
+	e.Exec(`INSERT INTO member_skills(workspace_id,user_id,skill_id) VALUES($1,$2,$3)`, ws.ID, ws.Agent.ID, skill)
+	remover, err := e.D.DB.Pool.Begin(e.Ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remover.Rollback(e.Ctx)
+	if _, err := remover.Exec(e.Ctx, `DELETE FROM member_skills WHERE workspace_id=$1 AND user_id=$2 AND skill_id=$3`, ws.ID, ws.Agent.ID, skill); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(e.Ctx, 3*time.Second)
+	defer cancel()
+	assign, err := e.D.DB.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer assign.Rollback(e.Ctx)
+	next, err := tickets.PickAssignee(ctx, assign, ws.ID, &team, tickets.AssignRoundRobin, []uuid.UUID{skill})
+	if err != nil || next != nil {
+		t.Fatalf("busy removal must not assign or wait: next=%v err=%v", next, err)
+	}
+	if err := assign.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	remover.Rollback(e.Ctx)
+	if err := e.D.DB.Tx(e.Ctx, func(tx pgx.Tx) error {
+		next, err := tickets.PickAssignee(e.Ctx, tx, ws.ID, &team, tickets.AssignRoundRobin, []uuid.UUID{skill})
+		if err != nil {
+			return err
+		}
+		if next == nil || *next != ws.Agent.ID {
+			t.Fatalf("rolled back removal lost eligibility: %v", next)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

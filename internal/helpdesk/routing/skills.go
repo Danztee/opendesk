@@ -2,13 +2,16 @@ package routing
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/useopendesk/opendesk/internal/audit"
 	"github.com/useopendesk/opendesk/internal/auth"
@@ -54,7 +57,7 @@ func skillChanged(ctx context.Context, tx pgx.Tx, p *auth.Principal, verb string
 // by rule writers when checking whether a skill is available for new requirements.
 func lockSkill(ctx context.Context, tx pgx.Tx, wid, id uuid.UUID) (Skill, error) {
 	// Match routing creation and event sequencing: workspace first, then skill.
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id=$1 FOR UPDATE`, wid); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id=$1 FOR NO KEY UPDATE`, wid); err != nil {
 		return Skill{}, err
 	}
 	s, err := scanSkill(tx.QueryRow(ctx, skillSelect+` WHERE s.workspace_id=$1 AND s.id=$2 FOR UPDATE OF s`, wid, id))
@@ -70,7 +73,7 @@ func skillName(ctx context.Context, tx pgx.Tx, wid, id uuid.UUID, raw string) (s
 		return "", err
 	}
 	// Catalog writers share the workspace lock so duplicate-name refusals stay typed.
-	if _, err = tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id=$1 FOR UPDATE`, wid); err != nil {
+	if _, err = tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id=$1 FOR NO KEY UPDATE`, wid); err != nil {
 		return "", err
 	}
 	var exists bool
@@ -203,11 +206,11 @@ func registerSkills(d *deps.Deps, api huma.API) {
 		}
 		slices.SortFunc(members, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
 		var s Skill
-		err = d.DB.Tx(ctx, func(tx pgx.Tx) error {
-			// Account writers publish workspace events after changing the account.
-			// Lock accounts first, then the workspace, skill and memberships.
+		err = retryRoutingWrite(ctx, d.DB, func(tx pgx.Tx) error {
+			// Existing member and account writers publish after their row changes.
+			// Acquire both eligibility locks without waiting before workspace serialization.
 			rows, err := tx.Query(ctx, `SELECT u.id FROM users u JOIN members m ON m.user_id=u.id
-				WHERE m.workspace_id=$1 AND u.id=ANY($2::uuid[]) ORDER BY u.id FOR SHARE OF u`, p.WorkspaceID, members)
+				WHERE m.workspace_id=$1 AND u.id=ANY($2::uuid[]) ORDER BY u.id FOR SHARE OF m,u NOWAIT`, p.WorkspaceID, members)
 			if err != nil {
 				return err
 			}
@@ -249,4 +252,26 @@ func registerSkills(d *deps.Deps, api huma.API) {
 		}
 		return &struct{ Body Skill }{s}, nil
 	})
+}
+
+// retryRoutingWrite releases every lock before retrying a busy routing dependency.
+func retryRoutingWrite(ctx context.Context, database *db.DB, write func(pgx.Tx) error) error {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err := database.Tx(ctx, write)
+		var pe *pgconn.PgError
+		if !errors.As(err, &pe) || pe.Code != "55P03" {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return httpx.Conflict("Routing settings are being updated. Try again.")
+		}
+		timer := time.NewTimer(20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
