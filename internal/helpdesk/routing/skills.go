@@ -238,6 +238,11 @@ func registerSkills(d *deps.Deps, api huma.API) {
 					return err
 				}
 			}
+			// Member removal can hold an old relation before publishing its workspace event.
+			// Lock every row DELETE will touch without waiting, including removed members.
+			if _, err = tx.Exec(ctx, `SELECT 1 FROM member_skills WHERE workspace_id=$1 AND skill_id=$2 FOR UPDATE NOWAIT`, p.WorkspaceID, id); err != nil {
+				return err
+			}
 			if _, err = tx.Exec(ctx, `DELETE FROM member_skills WHERE workspace_id=$1 AND skill_id=$2`, p.WorkspaceID, id); err != nil {
 				return err
 			}
