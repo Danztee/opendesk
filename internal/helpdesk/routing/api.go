@@ -251,6 +251,9 @@ func Register(d *deps.Deps, api huma.API) {
 				return nil, err
 			}
 			err = d.DB.Tx(ctx, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, p.WorkspaceID); err != nil {
+					return err
+				}
 				var name string
 				err := tx.QueryRow(ctx, `DELETE FROM routing_rules WHERE workspace_id = $1 AND id = $2 RETURNING name`, p.WorkspaceID, id).Scan(&name)
 				if db.IsNotFound(err) {
@@ -319,6 +322,9 @@ func reorder(ctx context.Context, tx pgx.Tx, p *auth.Principal, raw []string) ([
 			return nil, httpx.Validation("ids must not repeat")
 		}
 		order = append(order, id)
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE`, p.WorkspaceID); err != nil {
+		return nil, err
 	}
 	rows, err := tx.Query(ctx, ruleSelect+` WHERE r.workspace_id = $1 ORDER BY r.position, r.created_at, r.id FOR UPDATE`, p.WorkspaceID)
 	if err != nil {
