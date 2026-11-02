@@ -806,6 +806,13 @@
   },
   "links": {
     "title": "Linked",
+    "states": {
+      "backlog": "Backlog",
+      "todo": "To do",
+      "in_progress": "In progress",
+      "done": "Done",
+      "canceled": "Canceled"
+    },
     "removed": "Link removed",
     "remove": "Remove link",
     "removeNamed": "Remove the link to {{title}}",

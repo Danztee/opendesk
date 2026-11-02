@@ -802,6 +802,13 @@
   },
   "links": {
     "title": "Verknüpft",
+    "states": {
+      "backlog": "Backlog",
+      "todo": "Zu erledigen",
+      "in_progress": "In Arbeit",
+      "done": "Erledigt",
+      "canceled": "Abgebrochen"
+    },
     "removed": "Verknüpfung entfernt",
     "remove": "Verknüpfung entfernen",
     "removeNamed": "Verknüpfung mit {{title}} entfernen",

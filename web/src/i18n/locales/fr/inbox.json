@@ -788,6 +788,13 @@
   },
   "links": {
     "title": "Liens",
+    "states": {
+      "backlog": "À planifier",
+      "todo": "À faire",
+      "in_progress": "En cours",
+      "done": "Terminé",
+      "canceled": "Annulé"
+    },
     "removed": "Lien retiré",
     "remove": "Retirer le lien",
     "removeNamed": "Retirer le lien vers {{title}}",
