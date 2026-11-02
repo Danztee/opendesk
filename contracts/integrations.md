@@ -150,6 +150,7 @@ Tools turned off in settings are neither offered nor run. `disabled_tools`, `ask
 | `integration.created` / `integration.updated` | `{integration: Integration}` |
 | `integration.deleted` | `{integration_id}` |
 | `ticket_link.created` | `{ticket_id, link: Link}` |
+| `ticket_link.updated` | `{ticket_id, link: Link}` |
 | `ticket_link.deleted` | `{ticket_id, link_id}` |
 
 Activities: `linked{link_id, url, title, provider}`, `unlinked{url, title, provider}`.
