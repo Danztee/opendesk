@@ -30,7 +30,8 @@ import (
 func newPlacetelHarness(t *testing.T) *harness {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer placetel-token" {
+		token := r.Header.Get("Authorization")
+		if r.Method != http.MethodGet || (token != "Bearer placetel-token" && token != "Bearer placetel-token-2") {
 			t.Errorf("unexpected provider request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -153,6 +154,41 @@ func TestPlacetelManualWebhookConnection(t *testing.T) {
 	}
 	if n := len(h.e.Jobs(jobs.PhoneInboundArgs{}.Kind(), h.ws.ID)); n != 1 {
 		t.Fatalf("valid callback queued %d jobs", n)
+	}
+}
+
+func TestPlacetelCredentialReplacementRotatesWebhook(t *testing.T) {
+	h := newPlacetelHarness(t)
+	oldURL := h.conn.WebhookURL
+	oldPath := placetelHook(t, h)
+	body := placetelFixture(t, "incoming")
+	if got := postPlacetel(t, h, oldPath, body); got != http.StatusOK {
+		t.Fatalf("initial callback status %d", got)
+	}
+	connectionPath := "/v1/phone/connections/" + h.conn.ID.String()
+	h.e.Do("POST", connectionPath+"/test", h.ws.Admin.As(h.ws), nil).Want(t, 200).JSON(t, &h.conn)
+	if h.conn.HealthStatus != "healthy" || h.conn.HealthCode != phone.HealthReceiving || h.conn.LastEventAt == nil {
+		t.Fatalf("health before replacement %+v", h.conn)
+	}
+
+	h.e.Do("PATCH", connectionPath, h.ws.Admin.As(h.ws), map[string]any{
+		"credentials": map[string]string{"api_token": "placetel-token-2"},
+	}).Want(t, 200).JSON(t, &h.conn)
+	if h.conn.WebhookURL == oldURL || h.conn.WebhookURL == "" {
+		t.Fatalf("replacement did not return a new webhook URL: %+v", h.conn)
+	}
+	if h.conn.HealthStatus != "action_required" || h.conn.HealthCode != phone.HealthNoWebhook || h.conn.LastEventAt != nil {
+		t.Fatalf("health after replacement %+v", h.conn)
+	}
+	if got := postPlacetel(t, h, oldPath, body); got != http.StatusUnauthorized {
+		t.Fatalf("old callback status %d, want 401", got)
+	}
+	if got := postPlacetel(t, h, placetelHook(t, h), placetelFixture(t, "accepted")); got != http.StatusOK {
+		t.Fatalf("replacement callback status %d", got)
+	}
+	h.e.Do("POST", connectionPath+"/test", h.ws.Admin.As(h.ws), nil).Want(t, 200).JSON(t, &h.conn)
+	if h.conn.HealthStatus != "healthy" || h.conn.HealthCode != phone.HealthReceiving || h.conn.LastEventAt == nil {
+		t.Fatalf("health after replacement callback %+v", h.conn)
 	}
 }
 
