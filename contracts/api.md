@@ -17,6 +17,11 @@ it exists, and this file is the contract the parts are built against.
   widget's conversation and upload routes answer `403 feature_disabled`, for members, API keys, customers and
   visitors alike, so no ticket of the workspace is read, created or changed. Public help center articles and
   the widget's session and config stay available. Stored tickets are retained and return when Tickets is on.
+  Inbound email, phone events and support channel commands are still accepted and stored (the `inbound_emails`,
+  `phone_inbound_events` and `support_channel_inbound_events` rows, deduplicated as always) but change no ticket:
+  their jobs snooze (no attempt used, ten minutes at a time) and the rows stay pending, visible to operations as
+  scheduled jobs. Turning Tickets on wakes every held job, oldest first, so each becomes its ticket, reply or call
+  entry exactly once. Linking a support channel identity is not ticket work and is not held.
 - Errors: RFC 9457 problem+json `{ "status", "title", "detail", "code"?, "product"?, "reason"?, "errors"? }`.
   `code` is a stable machine string (`invalid_credentials`, `mfa_required`, `forbidden`,
   `not_found`, `conflict`, `rate_limited`, `validation_failed`). A suspended workspace answers

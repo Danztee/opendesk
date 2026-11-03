@@ -624,6 +624,7 @@ func (s *svc) registerWorkspaces(api huma.API) {
 				if err := tx.QueryRow(ctx, `SELECT settings FROM workspaces WHERE id = $1 FOR UPDATE`, p.WorkspaceID).Scan(&rawSettings); err != nil {
 					return err
 				}
+				ticketsWasOff := false
 				_, ticketPatch := patch["tickets_enabled"]
 				_, mailPatch := patch["mail_enabled"]
 				if ticketPatch || mailPatch {
@@ -632,6 +633,7 @@ func (s *svc) registerWorkspaces(api huma.API) {
 					var current map[string]json.RawMessage
 					_ = json.Unmarshal(rawSettings, &current)
 					tickets, mail := workspaceProductFlags(current)
+					ticketsWasOff = !tickets
 					if v, ok := patch["tickets_enabled"].(bool); ok {
 						tickets = v
 					}
@@ -640,6 +642,12 @@ func (s *svc) registerWorkspaces(api huma.API) {
 					}
 					if !tickets && !mail {
 						return httpx.E(422, "at_least_one_product_required", "At least one product must stay enabled.")
+					}
+					if ticketsWasOff && tickets {
+						// Inbound email, calls and channel messages held while Tickets was off resume now.
+						if err := products.Reactivate(ctx, tx, p.WorkspaceID); err != nil {
+							return err
+						}
 					}
 				}
 				if _, changes := patch["agent_online_time"]; changes {
