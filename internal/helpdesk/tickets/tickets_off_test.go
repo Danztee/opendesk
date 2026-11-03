@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/useopendesk/opendesk/internal/helpdesk/hdtest"
+	"github.com/useopendesk/opendesk/internal/helpdesk/tickets"
 )
 
 // With Tickets off every route tagged Tickets answers feature_disabled, for members and API
@@ -33,4 +34,28 @@ func TestTicketsOffRefusesTicketRoutes(t *testing.T) {
 
 	e.SetSettings(ws, map[string]any{"tickets_enabled": true})
 	e.Do("GET", "/v1/tickets/"+tk.ID.String(), ws.Admin.As(ws), nil).Want(t, 200)
+}
+
+// Scheduled ticket work leaves a workspace alone while Tickets is off and catches up once it is on.
+func TestTicketsOffPausesScheduledTicketWork(t *testing.T) {
+	e, ws := newEnv(t)
+	tk := createTicket(t, e, ws, map[string]any{"kind": "note"})
+	e.Exec(`UPDATE tickets SET status = 'solved', solved_at = now() - interval '30 days' WHERE id = $1`, tk.ID)
+	e.SetSettings(ws, map[string]any{"tickets_enabled": false})
+	if err := tickets.AutoClose(e.Ctx, e.D); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	e.Scalar(`SELECT status FROM tickets WHERE id = $1`, &status, tk.ID)
+	if status != "solved" {
+		t.Fatalf("closed while off: %s", status)
+	}
+	e.SetSettings(ws, map[string]any{"tickets_enabled": true})
+	if err := tickets.AutoClose(e.Ctx, e.D); err != nil {
+		t.Fatal(err)
+	}
+	e.Scalar(`SELECT status FROM tickets WHERE id = $1`, &status, tk.ID)
+	if status != "closed" {
+		t.Fatalf("not closed after on: %s", status)
+	}
 }

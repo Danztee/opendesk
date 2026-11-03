@@ -53,7 +53,7 @@ import { sortTeams, TeamDot, useTeamsCtx } from "@/components/tickets/teams";
 import { ViewIcon, viewName } from "@/components/tickets/ViewIcon";
 import type { SearchResults } from "@/lib/api/types";
 import { useCollab, useMailAccounts } from "@/lib/collab/hooks";
-import { useProducts } from "@/lib/products";
+import { TICKET_SETTINGS, useProducts } from "@/lib/products";
 import { compose } from "@/lib/collab/compose";
 import { AccountDot } from "@/components/collab/bits";
 import { WorkspaceBadge } from "@/components/workspaces/WorkspaceBadge";
@@ -430,7 +430,7 @@ export function CommandPalette() {
                     ["/settings/audit-log", "titles.auditLog"],
                     ["/settings/import", "command.importHistory"],
                   ] as const
-                ).map(([to, labelKey]) => (
+                ).filter(([to]) => ticketsOn || !TICKET_SETTINGS.has(to)).map(([to, labelKey]) => (
                   <Item key={to} value={`settings ${to}`} keywords={[tNav(labelKey)]} icon={<Settings />} hint={tNav("titles.settings")} {...link({ to })}>
                     {tNav(labelKey)}
                   </Item>

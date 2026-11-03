@@ -21,7 +21,7 @@ import { atLeast, bootSession, currentMembership, openLinkedWorkspace } from "./
 import { stripWorkspaceParam, workspaceParam } from "./lib/workspaceParam";
 import { queryClient } from "./lib/queryClient";
 import { q } from "./lib/queries";
-import { productHome, requireTickets } from "./lib/products";
+import { productHome, requireTickets, TICKET_SETTINGS } from "./lib/products";
 import { folderById, listQuery, parseInboxSearch, teamQuery } from "./lib/folders";
 import { withRememberedSort } from "./lib/listSort";
 import { isMailRouteBox, mailListQuery, parseMailSearch } from "./lib/collab/boxes";
@@ -591,6 +591,10 @@ const reportsRoute = createRoute({
 const settingsLayout = createRoute({
   getParentRoute: () => appLayout,
   path: "/settings",
+  // A link to a ticket setting is a link to nothing while Tickets is off.
+  beforeLoad: async ({ context, location }) => {
+    if ([...TICKET_SETTINGS].some((p) => location.pathname === p || location.pathname.startsWith(p + "/"))) await requireTickets(context.queryClient);
+  },
   component: page(() => import("./pages/settings/SettingsLayout")),
   staticData: { title: "settings" },
 });

@@ -29,3 +29,10 @@ export async function requireTickets(qc: QueryClient) {
   const p = productsOf(await qc.ensureQueryData(q.workspace()));
   if (!p.tickets) throw await productHome(qc);
 }
+
+/** Settings that only shape tickets: not listed, not offered in the command menu and not opened by a link while Tickets is off. */
+export const TICKET_SETTINGS: ReadonlySet<string> = new Set([
+  "/settings/tags", "/settings/custom-fields", "/settings/assignment", "/settings/triage", "/settings/business-hours",
+  "/settings/saved-replies", "/settings/views", "/settings/sla", "/settings/automations", "/settings/mailboxes", "/settings/phone",
+  "/settings/support-channels", "/settings/routing", "/settings/brands", "/settings/email-design",
+]);
