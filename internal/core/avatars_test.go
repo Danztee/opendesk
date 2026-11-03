@@ -190,8 +190,12 @@ func TestEffectiveMailStateOnWorkspaceMembershipAndImageEvent(t *testing.T) {
 	}
 	checkWorkspace(true, "")
 	e.d.Plan.CollabOff = true
-	checkWorkspace(false, "plan")
+	checkWorkspace(false, "instance_disabled")
 	e.d.Plan.CollabOff = false
+	originalPlan := e.d.Plan
+	e.d.Plan = plan.New(true, 1)
+	checkWorkspace(false, "plan")
+	e.d.Plan = originalPlan
 	e.d.Cfg.Collab = false
 	checkWorkspace(false, "instance_disabled")
 	e.d.Cfg.Collab = true

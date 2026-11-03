@@ -305,7 +305,7 @@ func (s *service) deliverCategoryIntent(ctx context.Context, job *river.Job[jobs
 	if err != nil {
 		return err
 	}
-	if ok, err := s.collabActive(ctx, a.WorkspaceID); err != nil || !ok {
+	if err := s.pauseIfInactive(ctx, a.WorkspaceID); err != nil {
 		return err
 	}
 	i, err := s.currentCategoryIntent(ctx, a, *args.CategoryIntentID)
@@ -418,6 +418,13 @@ func (s *service) recoverCategoryIntents(ctx context.Context) error {
 		return err
 	}
 	for _, d := range list {
+		active, err := s.collabActive(ctx, d.wid)
+		if err != nil {
+			return err
+		}
+		if !active {
+			continue
+		}
 		if err := s.d.DB.Tx(ctx, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, `UPDATE collab_category_intents SET state = CASE WHEN state = 'blocked' THEN 'pending' ELSE state END, updated_at = now() WHERE id = $1`, d.id); err != nil {
 				return err

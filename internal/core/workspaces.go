@@ -29,6 +29,7 @@ import (
 	"github.com/useopendesk/opendesk/internal/ids"
 	"github.com/useopendesk/opendesk/internal/jobs"
 	"github.com/useopendesk/opendesk/internal/plan"
+	"github.com/useopendesk/opendesk/internal/products"
 )
 
 // CoreWorkspaceSettings are the agent-editable workspace options (contracts/api.md).
@@ -203,23 +204,13 @@ func workspaceProductFlags(settings map[string]json.RawMessage) (tickets, mail b
 }
 
 func (s *svc) applyEffectiveMail(ctx context.Context, q db.Querier, w *CoreWorkspace) error {
-	w.MailAvailable = false
-	w.MailDisabledReason = ""
-	if !s.d.Cfg.Collab {
-		w.MailDisabledReason = "instance_disabled"
-		return nil
-	}
-	ent, err := s.d.Plan.Entitlements(ctx, q, w.ID)
+	state, err := products.Resolve(ctx, q, s.d.Plan, s.d.Cfg.Collab, w.ID, products.Settings{
+		TicketsEnabled: w.Settings.TicketsEnabled, MailEnabled: w.Settings.MailEnabled,
+	})
 	if err != nil {
 		return err
 	}
-	if !ent.Collab {
-		w.MailDisabledReason = "plan"
-	} else if w.Settings.MailEnabled != nil && !*w.Settings.MailEnabled {
-		w.MailDisabledReason = "workspace_disabled"
-	} else {
-		w.MailAvailable = true
-	}
+	w.MailAvailable, w.MailDisabledReason = state.Mail, state.MailDisabledReason
 	return nil
 }
 
