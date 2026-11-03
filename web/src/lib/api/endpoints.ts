@@ -393,8 +393,8 @@ export const api = {
     test: (b: RoutingTestBody) => http.post<T.RoutingTest>("/v1/routing/test", b),
   },
   apiKeys: {
-    ...crud<T.ApiKey, { name: string; scopes: string[]; expires_at?: string | null; private_team_ids?: string[] }>("/v1/api-keys"),
-    create: (b: { name: string; scopes: string[]; expires_at?: string | null; private_team_ids?: string[] }) =>
+    ...crud<T.ApiKey, { name: string; scopes: string[]; expires_at?: string | null; private_team_ids?: string[]; bot_id?: string | null }>("/v1/api-keys"),
+    create: (b: { name: string; scopes: string[]; expires_at?: string | null; private_team_ids?: string[]; bot_id?: string | null }) =>
       http.create<T.ApiKey & { secret: string }>("/v1/api-keys", b),
   },
   /** Settings > AI clients: opendesk's MCP server and the clients connected with OAuth. */
@@ -495,9 +495,10 @@ export const api = {
     deliveries: (q?: ListQuery) => http.get<T.Page<T.SupportChannelDelivery>>("/v1/support-channels/deliveries", { query: q }),
     operations: () => http.get<T.SupportChannelOperations>("/v1/support-channels/operations"),
     retryDelivery: (eventSeq: number) => http.post<{ event_seq: number; status: "queued" }>(`/v1/support-channels/deliveries/${eventSeq}/retry`),
-    addDestination: (b: { connection_id: string; team_id?: string; priority?: "low" | "normal" | "high" | "urgent"; external_channel_id: string; external_channel_name?: string; include_notes?: boolean; message_limit?: number }) =>
-      http.create<T.SupportChannelDestination>("/v1/support-channels/destinations", b),
-    updateDestination: (id: string, b: T.SupportChannelOllieUpdate) =>
+    addDestination: (
+      b: { connection_id: string; team_id?: string; priority?: "low" | "normal" | "high" | "urgent"; external_channel_id: string; external_channel_name?: string; message_limit?: number } & T.SupportChannelRouting,
+    ) => http.create<T.SupportChannelDestination>("/v1/support-channels/destinations", b),
+    updateDestination: (id: string, b: T.SupportChannelOllieUpdate & T.SupportChannelRouting) =>
       http.patch<T.SupportChannelDestination>(`/v1/support-channels/destinations/${id}`, b),
     removeDestination: (id: string) => http.del(`/v1/support-channels/destinations/${id}`),
     ollie: () => http.get<T.SupportChannelOllie>("/v1/support-channels/ollie"),
@@ -862,7 +863,7 @@ export const api = {
       list: (q: CollabThreadQuery) => http.get<T.Page<T.MailThread>>("/v1/collab/threads", { query: q }),
       get: (id: string) => http.get<T.MailThreadDetail>(`/v1/collab/threads/${id}`),
       /** All or nothing: a thread the caller cannot act on is 404. */
-      action: (b: { thread_ids: string[]; action: T.MailThreadAction; folder_id?: string; category?: string }) =>
+      action: (b: { thread_ids: string[]; action: T.MailThreadAction; folder_id?: string; category?: string; until?: string }) =>
         http.post<{ threads: T.MailThread[] }>("/v1/collab/threads/actions", b),
       share: (id: string, shares: T.MailAudience) => http.put<T.MailThreadDetail>(`/v1/collab/threads/${id}/shares`, { shares }),
       assign: (id: string, user_ids: string[]) => http.put<T.MailThreadDetail>(`/v1/collab/threads/${id}/assignees`, { user_ids }),
@@ -904,6 +905,8 @@ export const api = {
       /** With a body the draft is saved with it first. */
       send: (id: string, b?: CollabDraftBody) => http.post<T.MailMessage>(`/v1/collab/drafts/${id}/send`, b),
     },
+    /** A person's feedback on an AI draft, for the key that wrote it (contracts/collab.md "AI draft outcomes"). */
+    aiDraftFeedback: (id: string, b: T.AIDraftFeedbackBody) => http.put<void>(`/v1/collab/ai-drafts/${id}/feedback`, b),
     sidebar: {
       get: () => http.get<T.SidebarPrefs>("/v1/collab/sidebar"),
       put: (b: T.SidebarPrefs) => http.put<T.SidebarPrefs>("/v1/collab/sidebar", b),

@@ -624,7 +624,9 @@ or an OAuth access token (below); every tool runs through the public API in proc
 principal, so it gets exactly its scopes, role checks, validation, events, activities and audit
 entries. Writes are attributed to the key, or to the user who connected the client.
 
-Tools (offered only when the key has the scope):
+Tools (offered only when the key has the scope). In a workspace that does not use severity
+(`settings.severity_enabled` false, contracts/api.md), the ticket tools are listed without it:
+no severity to filter on, set or create with.
 
 | tool | scope | does |
 | --- | --- | --- |
@@ -645,8 +647,9 @@ Tools (offered only when the key has the scope):
 | `list_collab_conversations` | `collab:draft` (API keys only) | the Collab conversations of the key's creator (box, account, text), at most 50; reading changes no read state |
 | `get_collab_conversation` | `collab:draft` (API keys only) | a conversation with its messages and internal comments, as the creator sees it |
 | `draft_collab_reply` | `collab:draft` (API keys only) | saves a reply (or reply-all) draft to a message, `body` markdown, labelled "AI draft by" the key's name; never sends (contracts/collab.md "AI drafts"); with the `claim_token` of a claim it reports back on it (refused once the claim has expired or passed on) and ends it |
-| `claim_collab_conversation` | `collab:draft` (API keys only) | claims the conversation that has waited longest in Needs action with no draft, for `minutes` (1..15, 5), and returns it like `get_collab_conversation` with its `claim_token`; `claimed: false` when nothing waits (contracts/collab.md "AI queue") |
+| `claim_collab_conversation` | `collab:draft` (API keys only) | claims the conversation that has waited longest in Needs action with no draft, optionally only in `categories` (inbox category keys, at most 8; mail still waiting to be sorted is held back), for `minutes` (1..15, 5), and returns it like `get_collab_conversation` with its `claim_token`; `claimed: false` when nothing waits (contracts/collab.md "AI queue") |
 | `release_collab_conversation` | `collab:draft` (API keys only) | gives a claimed conversation back; `skip` (with a short `reason`) keeps it from the key until new mail arrives |
+| `list_collab_draft_outcomes` | `collab:draft` (API keys only) | what became of the key's drafts after its `cursor` (contracts/collab.md "AI draft outcomes"): outcome, its own last text, `client_ref`, the sent message's id and any feedback, at most 50 |
 
 Tool annotations mark read-only and destructive tools. Output is JSON text. No `Mcp-Session-Id` is
 issued. The server checks `Origin` (browser requests must come from

@@ -63,12 +63,18 @@ export type WorkspaceSettings = {
   send_and_finish_button?: boolean;
   /** Heartbeats count toward each member's online time, shown in the agents report. Default true; false records and shows none. */
   agent_online_time?: boolean;
+  /** Tickets have a severity beside their priority. Default true; false leaves it out of the app, and AI never sets it. The API still reads and writes it. */
+  severity_enabled?: boolean;
   /** Display-only names and colours for the fixed statuses and priorities. */
   status_labels?: Partial<Record<TicketStatus, DisplayOverride>>;
   priority_labels?: Partial<Record<Priority, DisplayOverride>>;
+  /** The times a ticket's snooze menu offers, in order (at most 8). Absent or empty: in 1 hour, in 4 hours, tomorrow and next week, at 09:00. */
+  snooze_presets?: SnoozePreset[];
 };
 /** `hidden` (statuses only): left out of the menus agents pick a status from. */
 export type DisplayOverride = { label?: string; color?: LabelColor; hidden?: boolean };
+/** A snooze menu time, on the agent's clock: the top of the hour at least `hours` away (1-168), `days` from today at `time` (1-365), or next Monday at `time` ("HH:mm"). */
+export type SnoozePreset = { kind: "hours"; hours: number } | { kind: "days"; days: number; time: string } | { kind: "week"; time: string };
 export type Workspace = {
   id: string;
   name: string;
@@ -452,8 +458,10 @@ export type Message = {
     type: "contact" | "user" | "system" | "api";
     user: UserRef | null;
     contact: ContactRef | null;
-    /** The bot an AI reply was sent as (contracts/bots.md). */
+    /** The bot a reply or note was sent as (contracts/bots.md): the AI agent's, or an API key's that speaks as one. */
     bot?: BotRef | null;
+    /** The API key that wrote it (type "api"); null otherwise. */
+    api_key?: { id: string; name: string } | null;
   };
   body_html: string;
   body_text: string;
@@ -579,7 +587,8 @@ export type CallData = {
 export type Activity = {
   id: string;
   ticket_id: string;
-  actor: { type: string; user: UserRef | null };
+  /** api_key: the key an API change was made with; null for others, older entries and deleted keys. */
+  actor: { type: string; user: UserRef | null; api_key?: { id: string; name: string } | null };
   type: ActivityType;
   data: Record<string, unknown>;
   created_at: string;
@@ -734,6 +743,8 @@ export type ConditionField =
   | "assignee_id" | "team_id" | "brand_id" | "widget_id" | "received_at"
   /** The call of a call_ended automation (contracts/phone.md "Automations"). */
   | "call_outcome" | "call_direction" | "call_missed_reason" | "call_time" | "call_line" | "call_tag"
+  /** A support channel destination's: business_hours or outside_business_hours when the event happens. */
+  | "time"
   /** A ticket custom field, or the ticket contact's. */
   | `field.${string}` | `contact.field.${string}`;
 /** `eq` is the AI sentiment condition's operator (contracts/ai.md). `any` and `none` on subject, body, from_email,
@@ -1017,6 +1028,8 @@ export type ApiKey = {
   created_by: UserRef | null;
   private_team_ids?: string[];
   private_teams?: PrivateTeamGrant[];
+  /** The bot the key speaks as on tickets (contracts/api.md "API keys"); null: it writes as itself. */
+  bot_id?: string | null;
 };
 export type Webhook = {
   id: string;
@@ -1159,6 +1172,12 @@ export type SupportChannelDestination = {
   include_notes: boolean;
   /** Maximum characters before the provider message links back to opendesk. */
   message_limit: number;
+  /** route: the most specific matching route on the connection posts the ticket. copy: posts every matching ticket as well. */
+  mode: SupportChannelDestinationMode;
+  /** Every condition must hold for a ticket's thread to start here (contracts/support-channels.md "Routing"). */
+  conditions: Condition[];
+  /** What the threads show besides the ticket card. */
+  mirror: SupportChannelMirror[];
   /** Ollie posts a summary when a ticket's thread opens. */
   ollie_summary: boolean;
   /** Ollie posts SLA and sentiment warnings in ticket threads. */
@@ -1168,6 +1187,10 @@ export type SupportChannelDestination = {
   ollie_length: SupportChannelOllieLength;
   created_at: string;
 };
+export type SupportChannelDestinationMode = "route" | "copy";
+export type SupportChannelMirror = "customer_replies" | "agent_replies" | "status_changes" | "assignee_changes" | "priority_changes";
+/** Where a destination's threads start and what they show; the create and update bodies share it. */
+export type SupportChannelRouting = Partial<Pick<SupportChannelDestination, "mode" | "conditions" | "mirror" | "include_notes">>;
 export type SupportChannelOllieLength = "brief" | "standard" | "detailed";
 /** Ticket changes Ollie may choose in support channel threads. */
 export type SupportChannelOllieAction = "reply" | "note" | "assign_self" | "status" | "priority" | "create_ticket";
@@ -1271,11 +1294,15 @@ export type PanelBlock =
   | { type: "fields"; title?: string; items: PanelField[] }
   | { type: "list"; title?: string; items: PanelListItem[] }
   | { type: "note"; text: string; tone: PanelTone };
+export type TicketPanelErrorCode = "timeout" | "rate_limited" | "ticket" | "refused" | "status" | "answer";
+
 export type TicketPanelData = {
   panel_id: string;
   kind: "shopify" | "http";
   state: "ok" | "empty" | "no_contact" | "error";
   message?: string;
+  /** error: why, for the app to say in the reader's language; absent when only `message` (the product's or the network's words) says it. */
+  code?: TicketPanelErrorCode;
   customer?: PanelCustomer;
   orders?: PanelOrder[];
   /** http: a version 1 answer's sections. */
@@ -1880,6 +1907,8 @@ export type AISettings = {
   assistant_peer?: boolean;
   /** Built-in changes Ollie makes without asking (contracts/ai.md "Approvals"). Default empty. */
   assistant_auto?: AssistantAutoTool[];
+  /** Drafts look up facts with the connected tools that run without approval as reads (contracts/ai.md "Drafts and connected tools"). Default true. */
+  draft_tools?: boolean;
   tone: string;
   reply_language: "customer" | "workspace";
   instructions: string;
@@ -2325,6 +2354,8 @@ export type BotPersonality = {
 export type BotUsage = {
   widgets: { id: string; name: string; brand_id: string }[];
   mailboxes: { id: string; name: string; email: string }[];
+  /** Live API keys that speak as the bot. */
+  api_keys?: { id: string; name: string }[];
 };
 export type Bot = {
   id: string;
@@ -2768,6 +2799,8 @@ export type MailThread = {
   has_attachments: boolean;
   /** A shared inbox conversation that still needs a person to handle it. */
   needs_action: boolean;
+  /** When a snoozed conversation is back in Needs action (contracts/collab.md "Snooze"); null when not snoozed. */
+  snoozed_until?: string | null;
   folder_ids: string[];
   /** Shared on its own beyond its account's audience. */
   shared: boolean;
@@ -2820,12 +2853,35 @@ export type MailMessage = {
   draft_id?: string | null;
   /** Drafts an AI key saved and no person has saved since: the key's name, shown "AI draft by" (contracts/collab.md "AI drafts"). */
   drafted_by_ai?: string | null;
+  /** The AI draft it is, or was sent from, even once a person took it over (contracts/collab.md "AI draft outcomes"). */
+  ai_draft?: AIDraftRef | null;
   /** The message of the conversation it answers (its In-Reply-To), when stored. */
   in_reply_to_id?: string | null;
   /** The account's address (its own or an alias) it was sent from or written to; null when none. */
   own_address?: string | null;
   /** Mail the account wrote: sent from opendesk, a draft, or in its Sent or Drafts at the provider. A From naming the account does not make mail outgoing. */
   outgoing: boolean;
+};
+
+export type AIDraftOutcomeKind = "sent_unchanged" | "sent_edited" | "discarded" | "replaced" | "abandoned";
+
+export type AIDraftRef = {
+  /** The AI draft record (PUT /v1/collab/ai-drafts/{id}/feedback). */
+  id: string;
+  /** The key's name when it last saved the draft. */
+  client: string;
+  outcome: AIDraftOutcomeKind | null;
+  has_feedback: boolean;
+};
+
+export type AIDraftFeedbackReason = "wrong_facts" | "wrong_tone" | "missing_info" | "should_not_answer" | "other";
+
+export type AIDraftFeedbackBody = {
+  reason: AIDraftFeedbackReason;
+  /** At most 1,000 characters. */
+  note?: string;
+  /** Sanitized like mail. */
+  better_answer_html?: string;
 };
 
 /** How a message came, read from its source (GET /v1/collab/messages/{id}/details). */
@@ -2949,7 +3005,7 @@ export type SidebarPrefs = {
 /** unread / total / none for mail rows; count / awaiting / urgent / overdue / none for ticket rows, and open for team rows. */
 export type SidebarBadge = "unread" | "total" | "count" | "awaiting" | "urgent" | "overdue" | "open" | "none";
 
-export type MailBox = "inbox" | "unread" | "starred" | "sent" | "drafts" | "archive" | "trash" | "spam" | "all" | "shared" | "assigned" | "needs_action";
+export type MailBox = "inbox" | "unread" | "starred" | "sent" | "drafts" | "archive" | "trash" | "spam" | "all" | "shared" | "assigned" | "needs_action" | "snoozed";
 
 export type MailThreadAction =
   | "read"
@@ -2966,11 +3022,12 @@ export type MailThreadAction =
   | "label"
   | "unlabel"
   | "done"
-  | "needs_action";
+  | "needs_action"
+  | "snooze";
 
 export type MailCounts = {
-  /** Unread conversations; assigned and shared: open ones. */
-  boxes: { inbox: number; unread: number; shared: number; assigned: number; drafts: number; needs_action: number };
+  /** Unread conversations; assigned, shared, needs_action and snoozed: open ones. */
+  boxes: { inbox: number; unread: number; shared: number; assigned: number; drafts: number; needs_action: number; snoozed?: number };
   accounts: Record<string, number>;
   folders: Record<string, number>;
   /** By account with aliases, then address (its own included): unread conversations in its inbox with it on a message; missing = 0. */

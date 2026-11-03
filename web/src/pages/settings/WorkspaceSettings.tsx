@@ -19,6 +19,8 @@ import { Picker } from "@/components/ui/picker";
 import { Switch } from "@/components/ui/switch";
 import { Segmented } from "@/components/ui/tabs";
 import { UNDO_SEND_CHAT_DEFAULT, UNDO_SEND_CHOICES, UNDO_SEND_DEFAULT } from "@/components/tickets/detail/outbox";
+import { DEFAULT_SNOOZE_PRESETS, sameSnoozePresets, snoozePresets } from "@/components/tickets/detail/snooze";
+import { SnoozePresetsEditor } from "@/components/settings2/SnoozePresetsEditor";
 import { finishWords } from "@/components/tickets/fields";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
@@ -33,10 +35,10 @@ import { q, qk } from "@/lib/queries";
 import { atLeast, reloadSession, updateWorkspace, useRole, useSession } from "@/lib/session";
 import { LOCALE_NAMES, matchLocale, SUPPORTED } from "@/i18n";
 
-type DisplaySettings = { status_labels?: Overrides<TicketStatus>; priority_labels?: Overrides<Priority>; send_and_finish_button?: boolean };
+type DisplaySettings = { status_labels?: Overrides<TicketStatus>; priority_labels?: Overrides<Priority>; send_and_finish_button?: boolean; severity_enabled?: boolean };
 type Draft = {
   name: string;
-  settings: Required<Pick<WS, "tickets_enabled" | "mail_enabled" | "timezone" | "help_center_enabled" | "help_center_title" | "csat_enabled" | "gravatar" | "domain_logos" | "undo_send_seconds" | "undo_send_chat_seconds" | "message_delete" | "collab_ticket_replies" | "collab_ticket_reply_to" | "agent_online_time">> & {
+  settings: Required<Pick<WS, "tickets_enabled" | "mail_enabled" | "timezone" | "help_center_enabled" | "help_center_title" | "csat_enabled" | "gravatar" | "domain_logos" | "undo_send_seconds" | "undo_send_chat_seconds" | "message_delete" | "collab_ticket_replies" | "collab_ticket_reply_to" | "agent_online_time" | "snooze_presets">> & {
     brand_color: string;
     locale: string;
     locale_fixed: boolean;
@@ -47,7 +49,12 @@ type Draft = {
 function toDraft(w: Workspace): Draft {
   const extra: DisplaySettings = w.settings;
   return {
-    display: { status_labels: extra.status_labels ?? {}, priority_labels: extra.priority_labels ?? {}, send_and_finish_button: extra.send_and_finish_button ?? false },
+    display: {
+      status_labels: extra.status_labels ?? {},
+      priority_labels: extra.priority_labels ?? {},
+      send_and_finish_button: extra.send_and_finish_button ?? false,
+      severity_enabled: extra.severity_enabled ?? true,
+    },
     name: w.name,
     settings: {
       tickets_enabled: w.settings.tickets_enabled ?? true,
@@ -67,6 +74,7 @@ function toDraft(w: Workspace): Draft {
       collab_ticket_replies: w.settings.collab_ticket_replies ?? true,
       collab_ticket_reply_to: w.settings.collab_ticket_reply_to ?? "address",
       agent_online_time: w.settings.agent_online_time ?? true,
+      snooze_presets: [...snoozePresets(w.settings)],
     },
   };
 }
@@ -117,6 +125,8 @@ export default function WorkspaceSettings() {
         ...d.settings,
         help_center_title: d.settings.help_center_title.trim(),
         brand_color: d.settings.brand_color || undefined,
+        // The defaults are stored as an empty list, so the workspace follows them if they change.
+        snooze_presets: sameSnoozePresets(d.settings.snooze_presets, DEFAULT_SNOOZE_PRESETS) ? [] : d.settings.snooze_presets,
         ...d.display,
       };
       return api.workspaces.update({ name: d.name.trim(), settings });
@@ -313,6 +323,9 @@ export default function WorkspaceSettings() {
               options={UNDO_SEND_CHOICES.map((n) => ({ value: String(n), label: n ? t("workspace.undoSeconds", { n }) : t("workspace.undoOff") }))}
             />
           </Row>
+          <Row label={t("workspace.snoozePresets")} description={t("workspace.snoozePresetsHint")} stack>
+            <SnoozePresetsEditor value={draft.settings.snooze_presets} onChange={(v) => set("snooze_presets", v)} disabled={!canEdit} />
+          </Row>
           <Row label={t("workspace.messageDelete")} description={t("workspace.messageDeleteHint")}>
             <Segmented
               value={draft.settings.message_delete}
@@ -405,6 +418,14 @@ export default function WorkspaceSettings() {
               aria-label={finishButton}
               checked={draft.display.send_and_finish_button}
               onCheckedChange={(v) => setDraft({ ...draft, display: { ...draft.display, send_and_finish_button: v } })}
+              disabled={!canEdit}
+            />
+          </Row>
+          <Row label={t("display.severity")} description={draft.display.severity_enabled ? t("display.severityOn") : t("display.severityOff")}>
+            <Switch
+              aria-label={t("display.severity")}
+              checked={draft.display.severity_enabled}
+              onCheckedChange={(v) => setDraft({ ...draft, display: { ...draft.display, severity_enabled: v } })}
               disabled={!canEdit}
             />
           </Row>

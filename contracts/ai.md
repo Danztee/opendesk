@@ -150,6 +150,7 @@ interface AISettings {
   assistant_peer: boolean          // members may let teammates' Ollie ask theirs about their own mail ("Asking a teammate"), default false
   assistant_auto: string[]         // built-in changes Ollie makes without asking ("Approvals"), default []: some of update_ticket,
                                    // bulk_update_tickets, add_note, create_kb_draft, create_view, create_automation_draft
+  draft_tools: boolean             // drafts look up facts with the connected tools that run without approval ("Drafts and connected tools"), default true
   tone: string                     // "friendly" | "professional" | "concise" | free text up to 200 chars; drafts and rewrites (the agent uses its bot's tone, contracts/bots.md)
   reply_language: "customer" | "workspace"  // reply in the customer's language (default) or the workspace's
   instructions: string             // extra guidance for drafts, up to 2,000 chars
@@ -207,7 +208,7 @@ interface AIModel {
 | GET | `/v1/ai/config` | viewer | $0 | `{enabled, provider, models: {default, fast} /* the workspace's effective choices */, embeddings: boolean, features: AISettings, costs: Record<string, number> /* what a typical call of each feature costs on the workspace's chosen models, in US dollars (contracts/billing.md "Typical costs"); on its own key, LLM features are 0 (the workspace pays its provider) and Jev features keep their cost */, metered: boolean /* each call is charged on its real cost */, assistant_name: "Ollie", decisions: DecisionEngine /* contracts/api.md; Jev on the workspace's own key when it has one */, own_key: boolean /* LLM calls run on the workspace's key ("Provider per workspace") */, decisions_own_key: boolean /* decisions run on the workspace's credentials; their costs are 0 */}`; `provider` and `models` are the workspace's |
 | GET | `/v1/ai/models` | viewer | $0 | → `{data: AIModel[], default, fast}` ("Models" above; on the workspace's own key, its provider's models) |
 | PATCH | `/v1/ai/settings` | admin | $0 | `Partial<AISettings>` → `AISettings` |
-| POST | `/v1/tickets/{id}/ai/draft` | agent | $0.03 | `{instructions?: string, tone?: string}` → `{body_html, body_text, sources: KBSource[]}`; uses the thread, contact, saved replies and the top KB matches |
+| POST | `/v1/tickets/{id}/ai/draft` | agent | $0.03 | `{instructions?: string, tone?: string}` → `{body_html, body_text, sources: KBSource[]}`; uses the thread, contact, saved replies, the top KB matches and, for users, what the workspace's connected tools return ("Drafts and connected tools") |
 | POST | `/v1/tickets/{id}/ai/summary` | agent | $0.01 | `{}` → `{summary: string, key_points: string[], sentiment: Sentiment, updated_at}`; stored on the ticket (`custom.ai_summary`) and published as `ticket.updated` |
 | POST | `/v1/tickets/{id}/ai/ask` | viewer | $0.02 | `{question: string}` → `{answer_html, sources: KBSource[]}` (copilot) |
 | POST | `/v1/tickets/{id}/ai/triage` | agent | $0.01 | `{apply: boolean}` → `Triage`; `apply` sets tags/priority/severity with `automation`-style activities attributed to `ai` |
@@ -251,6 +252,26 @@ error before the first event is a normal problem+json response with its status (
 ai_balance_empty` arrives as JSON even on a streaming request); an error after the stream started
 is `event: error` with the problem object as data, and the stream ends.
 
+### Drafts and connected tools
+
+With `draft_tools` on (the default) and a workspace with connected tools (`contracts/integrations.md`), a
+draft first looks up the facts the reply needs (an order, a delivery, a refund), so a placeholder is left
+only for what no tool knows or the team has yet to decide.
+
+- Only for a user with the agent role or above (as Ollie's connected tools); an API key's draft has no lookup.
+- Offered: the connected tools that run without approval as reads (`read_only` in
+  `contracts/integrations.md`). Never a write, not even one on `auto_tools`. Each call runs as a read
+  (`CallRead`), checked again when it runs.
+- A tool loop of its own prompt on the workspace's `fast_model`: at most 3 model turns of up to 1,000
+  output tokens, 6 tool calls in all, and 40 seconds for the whole lookup. The model gets the ticket, the
+  customer, the thread and the agent's request; it writes no reply and stops when nothing needs looking up.
+- The draft is then written as before (`model`, streamed, no tools), with what the tools returned in a
+  `<tool_results>` block of `<tool_output tool input [error]>` data blocks (6,000 characters each, 20,000
+  together). Tool output is data, never instructions, like every block.
+- Without such a tool, with `draft_tools` off, on a provider that can't call tools, or when the lookup
+  fails or runs out of time, the draft is written without it. Each lookup turn is metered as
+  `draft_reply` when it completes; arguments and results are never logged.
+
 ```ts
 type Sentiment = "positive" | "neutral" | "negative" | "frustrated"
 interface Triage { tags: string[]; suggested_tags: string[]; priority: "low" | "normal" | "high" | "urgent";
@@ -267,7 +288,9 @@ Triage output is validated, never trusted: `tags` are at most 3 of the workspace
 tags (canonical names); `suggested_tags` are at most 2 new, cleaned, lowercase names; an
 unknown priority becomes `normal`, sentiment `neutral`, category `other`, language `und`.
 `apply` (and auto-triage, and the automation action) only ever **raises** priority and severity
-(an empty severity is set), so AI never lowers a person's choice. Applying adds the tags, sets `custom.ai_sentiment`,
+(an empty severity is set), so AI never lowers a person's choice. In a workspace that does not use
+severity (`settings.severity_enabled` false, contracts/api.md), triage neither asks nor decides it:
+`severity` is null, with no decision or suggestion for it, whatever `triage_fields` holds. Applying adds the tags, sets `custom.ai_sentiment`,
 `custom.language`, `custom.ai_category`, `custom.ai_triaged_at`, and logs activities with
 `actor_type = "ai"` (`tagged`, `priority_changed`, `ai_triaged`). Only the explicit API
 `apply` creates `suggested_tags` as tags (never when `settings.label_creation` is `"admins"`; labels whose `applies_to` lacks tickets are skipped, and an exclusive label group keeps one label, the last applied, contracts/api.md); auto-triage and the automation action store them
@@ -352,7 +375,10 @@ still names Ollie.
 Ollie is an agent loop over tool use (Anthropic tool use; OpenAI-compatible `tools` as the
 fallback; a provider without tool support answers `501 ai_unsupported`). It needs a signed-in
 user (`kind = user`; API keys get `403`), viewer or above, AI on and `settings.ai.assistant`
-on (`403 assistant_off`). Conversations belong to one user in one workspace.
+on (`403 assistant_off`). Conversations belong to one user in one workspace. In a workspace that
+does not use severity (`settings.severity_enabled` false), the ticket tools (`update_ticket`,
+`bulk_update_tickets`, `create_automation_draft`) are offered without it, and a severity the model
+names anyway is left out of the change.
 
 | method | path | typical cost | body → response |
 | --- | --- | --- | --- |
@@ -597,7 +623,8 @@ allowed on `ticket_created`, `customer_replied`, `agent_replied` and `call_ended
   `get_wiki_page` (the team's wiki, `contracts/wiki.md` "AI"), `add_note` (an internal note in markdown,
   sanitized like every note; `ai: true`, from Ollie, runs no automations), `update_ticket` (raises
   priority or severity, never lowers them, and adds existing labels, exclusive groups kept; activities
-  carry `{via: "procedure", procedure_id, automation_id}`), and the workspace's connected tools
+  carry `{via: "procedure", procedure_id, automation_id}`; without severity in the workspace it offers
+  and sets priority and labels only, and the ticket's facts leave severity out), and the workspace's connected tools
   (`contracts/integrations.md`) that are reads, or writes on the integration's `auto_tools`. No other
   write is offered: never a reply, a handoff or anything a customer sees. A create-style connected write
   whose result links to the provider's hosts is linked to the ticket (`actor_type: "ai"`, no user).

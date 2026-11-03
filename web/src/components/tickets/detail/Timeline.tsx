@@ -19,12 +19,13 @@ import { isSeverity, pct } from "@/lib/decisions";
 import { MessageItem, type ThreadActions } from "./MessageItem";
 import { LiveAgentReply } from "./AgentReply";
 import { CallEntry } from "./CallEntry";
-import { stickToBottom, type Stick } from "./stickToBottom";
+import { latestMessageFloor, stickToBottom, type Stick } from "./stickToBottom";
 import { BotFace } from "@/components/bots/BotFace";
 import { isAIActor, OllieAvatar, useAssistantName } from "../ollie";
 import { fieldText, useDisplay, useTicketFields, type CustomField } from "../fields";
 import { messageSide, sideClass } from "./messageFrame";
 import { useConversationLayout } from "@/lib/conversationLayout";
+import { conversationMaxWidth, useConversationWidth } from "@/lib/conversationWidth";
 
 type Item = { kind: "message"; at: string; m: Message } | { kind: "activity"; at: string; a: Activity };
 
@@ -47,6 +48,8 @@ function actorName(a: Activity, t: TFunction<"inbox">, ollie: string) {
   // The AI acts on someone's behalf (actor.user), but the change is Ollie's.
   if (isAIActor(a.actor)) return ollie;
   if (a.actor.user) return a.actor.user.name;
+  // An API key's change (a routine, an integration) names the key it was made with.
+  if (a.actor.api_key?.name) return a.actor.api_key.name;
   if (typeof a.data.automation_name === "string") return t("activity.automationNamed", { name: a.data.automation_name });
   if (a.actor.type === "automation") return t("activity.automation");
   if (a.actor.type === "contact") return t("activity.customer");
@@ -410,6 +413,8 @@ export function Timeline({
   const { t } = useTranslation("indicators");
   // Messages to the customer's side and the team's (Settings → Profile → Appearance); activity stays full width.
   const conversation = useConversationLayout();
+  // A readable measure, or the pane's whole width (Settings → Profile → Appearance).
+  const width = useConversationWidth();
   const threadById = useMemo(() => new Map((threads ?? []).map((th) => [th.id, th])), [threads]);
   // Each thread's latest message carries its actions; its first says what went along.
   const [firstInThread, lastInThread] = useMemo(() => {
@@ -465,7 +470,9 @@ export function Timeline({
     return l ? l.text.length + l.tools.length : 0;
   });
   useLayoutEffect(() => {
-    const s = stickToBottom(scroller.current!, content.current!);
+    const el = scroller.current!, box = content.current!;
+    // History after the latest message (triage, rules, API keys) never scrolls the message away on open.
+    const s = stickToBottom(el, box, () => latestMessageFloor(el, box));
     stick.current = s;
     return () => {
       s.stop();
@@ -477,7 +484,7 @@ export function Timeline({
   let lastDay = "";
   return (
     <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" aria-label={t("tickets.conversation")} role="log">
-      <div ref={content} className={cn("mx-auto flex w-full max-w-[820px] flex-col gap-2 px-5 py-5", conversation && "@container")}>
+      <div ref={content} className={cn("mx-auto flex w-full flex-col gap-2 px-5 py-5", conversationMaxWidth(width), conversation && "@container")}>
         {loading ? (
           <div className="flex flex-col gap-3">
             {[0, 1].map((i) => (

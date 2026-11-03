@@ -46,18 +46,24 @@ type FromAccountInput struct {
 	ReplyTo   string `json:"reply_to,omitempty" maxLength:"254" doc:"address (the address's own reply-to), mailbox (the ticket's reply address) or an email address; left out: the workspace's collab_ticket_reply_to"`
 }
 
-const activitySelect = `SELECT a.id, a.ticket_id, a.actor_type, a.type, a.data, a.created_at, u.id, u.name, u.email, u.avatar_url
-FROM activities a LEFT JOIN users u ON u.id = a.actor_user_id`
+const activitySelect = `SELECT a.id, a.ticket_id, a.actor_type, a.type, a.data, a.created_at, u.id, u.name, u.email, u.avatar_url,
+	k.id, k.name
+FROM activities a LEFT JOIN users u ON u.id = a.actor_user_id
+LEFT JOIN api_keys k ON a.actor_type = 'api' AND k.workspace_id = a.workspace_id AND k.id::text = a.data->>'api_key_id'`
 
 func scanActivity(row pgx.Row) (domain.Activity, error) {
 	var a domain.Activity
 	var uID *uuid.UUID
-	var uName, uEmail, uAvatar *string
-	if err := row.Scan(&a.ID, &a.TicketID, &a.Actor.Type, &a.Type, &a.Data, &a.CreatedAt, &uID, &uName, &uEmail, &uAvatar); err != nil {
+	var uName, uEmail, uAvatar, kName *string
+	var kID *uuid.UUID
+	if err := row.Scan(&a.ID, &a.TicketID, &a.Actor.Type, &a.Type, &a.Data, &a.CreatedAt, &uID, &uName, &uEmail, &uAvatar, &kID, &kName); err != nil {
 		return a, err
 	}
 	if uID != nil {
 		a.Actor.User = &domain.UserRef{ID: *uID, Name: str(uName), Email: str(uEmail), AvatarURL: domain.Avatar(str(uAvatar))}
+	}
+	if kID != nil {
+		a.Actor.APIKey = &domain.APIKeyRef{ID: *kID, Name: str(kName)}
 	}
 	if a.Data == nil {
 		a.Data = map[string]any{}
@@ -305,9 +311,17 @@ func PostMessage(ctx context.Context, tx pgx.Tx, d *deps.Deps, p *auth.Principal
 			return domain.Message{}, err
 		}
 	}
+	// An API key may speak as a bot: the bot is then the agent its reply is filled and sent as.
+	bot, err := keyBot(ctx, tx, p)
+	if err != nil {
+		return domain.Message{}, err
+	}
 	bodyHTML := hd.SanitizeRich(b.BodyHTML)
 	if b.Kind == "reply" {
 		ref := templates.Ref{WorkspaceID: wid, TicketID: &tid, AuthorUserID: actor.UserID, MailboxID: mailboxID}
+		if bot != nil {
+			ref.BotName = bot.Name
+		}
 		var err error
 		if bodyHTML, err = hd.FillReply(ctx, tx, d.Cfg, ref, b.BodyHTML); err != nil {
 			return domain.Message{}, err
@@ -354,9 +368,11 @@ func PostMessage(ctx context.Context, tx pgx.Tx, d *deps.Deps, p *auth.Principal
 			nm.CollabAccountID, nm.CollabReplyTo = &personal.AccountID, personal.ReplyTo
 		}
 		nm.DeliveryStatus = "pending"
+		nm.BodyHTML, nm.BodyText = withSignOff(nm.BodyHTML, nm.BodyText, bot)
 	} else if len(b.Cc)+len(b.Bcc) > 0 {
 		return domain.Message{}, httpx.Validation("cc and bcc apply only to email replies")
 	}
+	asKeyBot(&nm, p, bot)
 	if actor.UserID != nil && nm.FromName == "" {
 		if u, err := domain.LoadUserRef(ctx, tx, *actor.UserID); err == nil {
 			nm.FromName = u.Name

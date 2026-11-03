@@ -212,6 +212,7 @@ export function defaultAi(): AISettings {
     assistant: true,
     assistant_peer: false,
     assistant_auto: [],
+    draft_tools: true,
     tone: "friendly",
     reply_language: "customer",
     instructions: "",

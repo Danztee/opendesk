@@ -3,6 +3,8 @@ package phone_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"slices"
@@ -354,19 +356,26 @@ func TestWebhookVerification(t *testing.T) {
 		res.Body.Close()
 		return res.StatusCode
 	}
+	// Addresses of this run only (2001:db8::/32): the limiter lives as long as the process,
+	// so under -count a fixed address would start the next run already over its limit.
+	addr := func() string {
+		u := uuid.New()
+		return net.IP(append([]byte{0x20, 0x01, 0x0d, 0xb8}, u[4:]...)).String()
+	}
+	flood, unknown, provider := addr(), addr(), addr()
 	hook := "/v1/phone/hooks/aircall/" + h.conn.ID.String()
 	forged := bytes.ReplaceAll(body, []byte(h.token(t)), []byte("forged"))
 	codes := map[int]int{}
 	for i := 0; i < 40; i++ {
-		codes[from("203.0.113.9", hook, forged)]++
+		codes[from(flood, hook, forged)]++
 	}
 	for i := 0; i < 40; i++ {
-		codes[from("203.0.113.10", "/v1/phone/hooks/aircall/"+uuid.NewString(), body)]++
+		codes[from(unknown, "/v1/phone/hooks/aircall/"+uuid.NewString(), body)]++
 	}
 	if codes[401] != 30 || codes[404] != 30 || codes[429] != 20 {
 		t.Fatalf("forged and unknown: %v", codes)
 	}
-	if got := from("198.51.100.7", hook, ignored); got != 200 {
+	if got := from(provider, hook, ignored); got != 200 {
 		t.Fatalf("the provider's event after a flood from elsewhere: %d", got)
 	}
 
@@ -598,6 +607,36 @@ func TestVoicemailOutboundAndPlacement(t *testing.T) {
 	h.sendAll(t, [][]byte{anon})
 	if tk := h.ticketOfCall(t, "1290006"); tk.Contact != nil || tk.Subject != "Call from a withheld number" {
 		t.Fatalf("anonymous %+v", tk)
+	}
+}
+
+// A workspace whose locale is French gets the call's ticket subject and its insight card in
+// French.
+func TestCallTextsFollowTheWorkspaceLocale(t *testing.T) {
+	h := newHarness(t)
+	h.e.Exec(`UPDATE workspaces SET settings = settings || '{"locale": "fr-BE"}'::jsonb WHERE id = $1`, h.ws.ID)
+	cid := uuid.New()
+	h.e.Exec(`INSERT INTO contacts (id, workspace_id, name, phone) VALUES ($1, $2, 'Jane Doe', '+32 470 12 34 56')`, cid, h.ws.ID)
+	var earlier domain.Ticket
+	h.e.Do("POST", "/v1/tickets", h.ws.Admin.As(h.ws), map[string]any{"subject": "Commande 1042", "channel": "api", "kind": "note",
+		"body_html": "<p>Avant</p>", "status": "solved"}).Want(t, 201).JSON(t, &earlier)
+	h.e.Exec(`UPDATE tickets SET contact_id = $2, solved_at = now() - interval '400 days' WHERE id = $1`, earlier.ID, cid)
+
+	h.sendAll(t, h.recorded(t, "answered")[:1])
+	if tk := h.ticketOfCall(t, "1290001"); tk.Subject != "Appel de Jane Doe" {
+		t.Fatalf("subject %q", tk.Subject)
+	}
+	cards := h.f.Cards("1290001")
+	if len(cards) != 1 {
+		t.Fatalf("cards %+v", cards)
+	}
+	var lines []string
+	for _, c := range cards[0]["contents"].([]any)[1:] {
+		item := c.(map[string]any)
+		lines = append(lines, item["label"].(string)+": "+item["text"].(string))
+	}
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "Ticket: #") || lines[1] != fmt.Sprintf("Précédent: #%d Commande 1042 · Résolu", earlier.Number) {
+		t.Fatalf("card lines %v", lines)
 	}
 }
 
