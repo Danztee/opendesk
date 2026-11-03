@@ -150,7 +150,8 @@ export function CommandPalette() {
   const link = (to: NavigateOptions) => ({ href: toHref(to), onSelect: () => go(() => void navigate(to)) });
   const root = useRef<HTMLDivElement>(null);
 
-  const results = search.data;
+  // The server leaves tickets out while Tickets is off; a result cached before that is not shown either.
+  const results = search.data && !ticketsOn ? { ...search.data, tickets: [] } : search.data;
   const wikiPages = results?.wiki_pages ?? [];
   const hasResults = !!results && (results.tickets.length + results.contacts.length + results.articles.length + wikiPages.length > 0);
   const role = useRole();

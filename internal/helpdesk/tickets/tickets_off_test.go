@@ -59,3 +59,23 @@ func TestTicketsOffPausesScheduledTicketWork(t *testing.T) {
 		t.Fatalf("not closed after on: %s", status)
 	}
 }
+
+// Search keeps answering for contacts, articles and pages while Tickets is off, without a ticket.
+func TestTicketsOffSearchLeavesTicketsOut(t *testing.T) {
+	e, ws := newEnv(t)
+	createTicket(t, e, ws, map[string]any{"kind": "note", "subject": "Zebrafinch migration"})
+	search := func() int {
+		var out struct {
+			Tickets []map[string]any `json:"tickets"`
+		}
+		e.Do("GET", "/v1/search?q=Zebrafinch", ws.Admin.As(ws), nil).Want(t, 200).JSON(t, &out)
+		return len(out.Tickets)
+	}
+	if search() != 1 {
+		t.Fatal("ticket not found while on")
+	}
+	e.SetSettings(ws, map[string]any{"tickets_enabled": false})
+	if n := search(); n != 0 {
+		t.Fatalf("%d tickets found while off", n)
+	}
+}
