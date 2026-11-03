@@ -2911,7 +2911,7 @@ export type MailPersonFile = { thread_id: string; message_id: string; sent_at: s
 export type CollabStatus = {
   enabled: boolean;
   /** Why not: not on the plan, or off on this instance. */
-  reason: "plan" | "disabled" | null;
+  reason: "plan" | "disabled" | "workspace_disabled" | null;
   providers: { google: boolean; microsoft: boolean; imap: boolean };
   /** Accounts the caller sees. */
   accounts: number;
