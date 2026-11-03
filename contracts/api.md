@@ -12,6 +12,11 @@ it exists, and this file is the contract the parts are built against.
   configuration, Collab entitlement, then the workspace flag in that order. Mail status/sidebar
   remain accessible; `GET /v1/collab` reports `reason: "disabled" | "plan" | "workspace_disabled" | null`
   with the same precedence (contracts/collab.md). Stored data and connections are retained.
+  While Tickets is off (`product: "tickets"`, `reason: "workspace_disabled"`) every route tagged Tickets or
+  Reports, the customer portal's sign-in and request routes (its brand config stays readable) and the chat
+  widget's conversation and upload routes answer `403 feature_disabled`, for members, API keys, customers and
+  visitors alike, so no ticket of the workspace is read, created or changed. Public help center articles and
+  the widget's session and config stay available. Stored tickets are retained and return when Tickets is on.
 - Errors: RFC 9457 problem+json `{ "status", "title", "detail", "code"?, "product"?, "reason"?, "errors"? }`.
   `code` is a stable machine string (`invalid_credentials`, `mfa_required`, `forbidden`,
   `not_found`, `conflict`, `rate_limited`, `validation_failed`). A suspended workspace answers
