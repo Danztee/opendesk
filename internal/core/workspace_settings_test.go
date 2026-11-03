@@ -6,6 +6,24 @@ import (
 )
 
 func TestWorkspaceProductSettingsDefaultAndPatch(t *testing.T) {
+	defaults := defaultWorkspaceSettings()
+	if defaults.TicketsEnabled == defaults.MailEnabled {
+		t.Fatal("product setting defaults share a pointer")
+	}
+	if err := json.Unmarshal([]byte(`{"mail_enabled":false}`), &defaults); err != nil {
+		t.Fatal(err)
+	}
+	if defaults.TicketsEnabled == nil || !*defaults.TicketsEnabled || defaults.MailEnabled == nil || *defaults.MailEnabled {
+		t.Fatalf("mail-only disable changed the wrong default: %+v", defaults)
+	}
+	defaults = defaultWorkspaceSettings()
+	if err := json.Unmarshal([]byte(`{"tickets_enabled":false}`), &defaults); err != nil {
+		t.Fatal(err)
+	}
+	if defaults.TicketsEnabled == nil || *defaults.TicketsEnabled || defaults.MailEnabled == nil || !*defaults.MailEnabled {
+		t.Fatalf("tickets-only disable changed the wrong default: %+v", defaults)
+	}
+
 	var old map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(`{"timezone":"UTC"}`), &old); err != nil {
 		t.Fatal(err)

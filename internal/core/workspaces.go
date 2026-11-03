@@ -157,13 +157,8 @@ func scanWorkspace(row pgx.Row, extra ...any) (CoreWorkspace, error) {
 	if err != nil {
 		return w, err
 	}
-	trueValue := true
-	w.Settings.TicketsEnabled, w.Settings.MailEnabled = &trueValue, &trueValue
+	w.Settings = defaultWorkspaceSettings()
 	_ = json.Unmarshal(raw, &w.Settings)
-	w.MailAvailable = w.Settings.MailEnabled == nil || *w.Settings.MailEnabled
-	if !w.MailAvailable {
-		w.MailDisabledReason = "workspace_disabled"
-	}
 	if w.AvatarURL != "" {
 		w.AvatarSource = ptr("upload")
 	}
@@ -174,6 +169,22 @@ func scanWorkspace(row pgx.Row, extra ...any) (CoreWorkspace, error) {
 
 func loadWorkspace(ctx context.Context, q db.Querier, wid uuid.UUID) (CoreWorkspace, error) {
 	return scanWorkspace(q.QueryRow(ctx, `SELECT `+workspaceCols+` FROM workspaces w WHERE w.id = $1`, wid))
+}
+
+func defaultWorkspaceSettings() CoreWorkspaceSettings {
+	tickets, mail := true, true
+	return CoreWorkspaceSettings{TicketsEnabled: &tickets, MailEnabled: &mail}
+}
+
+func (s *svc) loadWorkspace(ctx context.Context, q db.Querier, wid uuid.UUID) (CoreWorkspace, error) {
+	w, err := loadWorkspace(ctx, q, wid)
+	if err != nil {
+		return w, err
+	}
+	if err := s.applyEffectiveMail(ctx, q, &w); err != nil {
+		return w, err
+	}
+	return w, nil
 }
 
 func workspaceProductFlags(settings map[string]json.RawMessage) (tickets, mail bool) {
@@ -212,7 +223,7 @@ func (s *svc) applyEffectiveMail(ctx context.Context, q db.Querier, w *CoreWorks
 	return nil
 }
 
-func loadMemberships(ctx context.Context, q db.Querier, uid uuid.UUID) ([]CoreMembership, error) {
+func (s *svc) loadMemberships(ctx context.Context, q db.Querier, uid uuid.UUID) ([]CoreMembership, error) {
 	rows, err := q.Query(ctx, `SELECT `+workspaceCols+`, m.role, w.suspended_at IS NOT NULL FROM members m JOIN workspaces w ON w.id = m.workspace_id
 		WHERE m.user_id = $1 ORDER BY m.created_at LIMIT 200`, uid)
 	if err != nil {
@@ -226,6 +237,11 @@ func loadMemberships(ctx context.Context, q db.Querier, uid uuid.UUID) ([]CoreMe
 	})
 	if out == nil {
 		out = []CoreMembership{}
+	}
+	for i := range out {
+		if err := s.applyEffectiveMail(ctx, q, &out[i].Workspace); err != nil {
+			return nil, err
+		}
 	}
 	return out, err
 }
@@ -459,7 +475,7 @@ func (s *svc) createWorkspace(ctx context.Context, tx pgx.Tx, p *auth.Principal,
 	if err := audit.Log(ctx, tx, p, wid, "workspace.created", "workspace", &wid, map[string]any{"name": name}); err != nil {
 		return CoreWorkspace{}, err
 	}
-	return loadWorkspace(ctx, tx, wid)
+	return s.loadWorkspace(ctx, tx, wid)
 }
 
 // fileKeys lists the stored objects of a workspace, removed after the rows are.
@@ -567,9 +583,6 @@ func (s *svc) registerWorkspaces(api huma.API) {
 			if err != nil {
 				return nil, httpx.Wrap(err)
 			}
-			if err := s.applyEffectiveMail(ctx, s.d.DB.Pool, &w); err != nil {
-				return nil, httpx.Wrap(err)
-			}
 			s.d.Analytics.Capture(p.UserID.String(), w.ID.String(), "workspace_created", nil)
 			return &struct{ Body CoreWorkspace }{w}, nil
 		})
@@ -581,11 +594,8 @@ func (s *svc) registerWorkspaces(api huma.API) {
 			if err != nil {
 				return nil, httpx.Wrap(err)
 			}
-			w, err := loadWorkspace(ctx, s.d.DB.Pool, p.WorkspaceID)
+			w, err := s.loadWorkspace(ctx, s.d.DB.Pool, p.WorkspaceID)
 			if err != nil {
-				return nil, httpx.Wrap(err)
-			}
-			if err := s.applyEffectiveMail(ctx, s.d.DB.Pool, &w); err != nil {
 				return nil, httpx.Wrap(err)
 			}
 			return &struct{ Body CoreWorkspace }{w}, nil
@@ -674,16 +684,13 @@ func (s *svc) registerWorkspaces(api huma.API) {
 				if err := brands.SyncDefault(ctx, tx, s.d.Cfg, p.WorkspaceID, patch); err != nil {
 					return err
 				}
-				if w, err = loadWorkspace(ctx, tx, p.WorkspaceID); err != nil {
-					return err
-				}
-				if err := s.applyEffectiveMail(ctx, tx, &w); err != nil {
+				if w, err = s.loadWorkspace(ctx, tx, p.WorkspaceID); err != nil {
 					return err
 				}
 				if len(changed) == 0 {
 					return nil
 				}
-				return publishWorkspace(ctx, tx, w)
+				return s.publishWorkspace(ctx, tx, w)
 			})
 			if err != nil {
 				return nil, httpx.Wrap(err)
@@ -867,7 +874,10 @@ func (s *svc) rotateWidgetSecret(ctx context.Context, id *uuid.UUID) (*widgetSec
 }
 
 // publishWorkspace sends workspace.updated.
-func publishWorkspace(ctx context.Context, tx pgx.Tx, w CoreWorkspace) error {
+func (s *svc) publishWorkspace(ctx context.Context, tx pgx.Tx, w CoreWorkspace) error {
+	if err := s.applyEffectiveMail(ctx, tx, &w); err != nil {
+		return err
+	}
 	_, err := events.Publish(ctx, tx, events.Event{WorkspaceID: w.ID, Type: "workspace.updated", Data: map[string]any{"workspace": w}})
 	return err
 }

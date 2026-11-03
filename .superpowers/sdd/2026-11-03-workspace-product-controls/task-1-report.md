@@ -26,3 +26,16 @@
 - Confirmed existing rows with no product keys map to both enabled in the compatibility helper and response model.
 - Confirmed product validation reads and checks the merged settings while holding the workspace row lock.
 - No data migration is required. No unresolved concerns.
+
+## Review fixes
+
+- Allocated independent defaults for `tickets_enabled` and `mail_enabled`, with regression coverage proving disabling either flag leaves the other enabled and old JSON missing either key retains the enabled default.
+- Centralized effective Mail application in the service's Workspace loader and membership loader. `/v1/workspace`, workspace creation/updates, invitation responses, workspace image responses, `/v1/me` memberships, workspace overviews, and workspace image/settings events now carry instance and entitlement precedence. Image hooks receive the service so event payloads use the same calculation.
+- Added `TestEffectiveMailStateOnWorkspaceMembershipAndImageEvent` for `/v1/workspace`, `/v1/me`, instance/plan/workspace reason precedence, and image event payloads.
+
+### Verification after review fixes
+
+- `go test ./internal/core` — passed; database-backed tests are skipped unless `OPENDESK_TEST_DATABASE_URL` is set.
+- `go test ./internal/core -run 'TestWorkspaceProductSettingsDefaultAndPatch|TestEffectiveMailStateOnWorkspaceMembershipAndImageEvent' -v` — pointer/default regression passed; the integration test was skipped because `OPENDESK_TEST_DATABASE_URL` is not configured.
+- `go build ./...` — passed.
+- `go vet ./...` — passed.
