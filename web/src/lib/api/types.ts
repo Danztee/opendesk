@@ -25,6 +25,10 @@ export type TimeFormat = "auto" | "12h" | "24h";
 export type UserRef = { id: string; name: string; email: string; avatar_url: string | null };
 
 export type WorkspaceSettings = {
+  /** Whether ticketing is enabled for this workspace. Defaults to true. */
+  tickets_enabled?: boolean;
+  /** Whether Mail is enabled for this workspace. Defaults to true; effective availability is Workspace.mail_available. */
+  mail_enabled?: boolean;
   brand_color?: string;
   timezone?: string;
   help_center_enabled?: boolean;
@@ -71,6 +75,8 @@ export type Workspace = {
   slug: string;
   widget_key: string;
   settings: WorkspaceSettings;
+  mail_available: boolean;
+  mail_disabled_reason?: "instance_disabled" | "plan" | "workspace_disabled";
   /** The workspace logo. */
   avatar_url: string | null;
   avatar_source: "upload" | null;
