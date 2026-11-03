@@ -795,6 +795,13 @@
       "done": "Terminé",
       "canceled": "Annulé"
     },
+    "add": "Ajouter un lien",
+    "addTitle": "Ajouter un lien",
+    "addDescription": "Ajoutez à ce ticket une URL Linear ou provenant d’un autre outil.",
+    "url": "URL",
+    "linkTitle": "Titre (facultatif)",
+    "httpsRequired": "Saisissez une URL HTTPS complète.",
+    "added": "Lien ajouté",
     "removed": "Lien retiré",
     "remove": "Retirer le lien",
     "removeNamed": "Retirer le lien vers {{title}}",
