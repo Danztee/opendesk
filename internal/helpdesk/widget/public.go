@@ -516,9 +516,6 @@ func (h *handler) session(ctx context.Context, in *widgetSessionInput) (*widgetS
 		if c.Blocked {
 			return httpx.E(http.StatusForbidden, "blocked", "This conversation is not available.")
 		}
-		if wset.RequireEmail && c.Email == nil && email == "" {
-			return httpx.E(http.StatusUnprocessableEntity, "email_required", "Enter your email address to start a chat.")
-		}
 		if token == "" {
 			token = "od_vis_" + crypto.RandomToken(32)
 			if _, err := tx.Exec(ctx, `INSERT INTO widget_sessions (id, workspace_id, contact_id, token_hash, verified, user_agent, widget_id)
