@@ -24,10 +24,11 @@ import (
 )
 
 type session struct {
-	VisitorToken string            `json:"visitor_token"`
-	Contact      domain.ContactRef `json:"contact"`
-	WSToken      string            `json:"ws_token"`
-	GatewayURL   string            `json:"gateway_url"`
+	EmailCollected bool              `json:"email_collected"`
+	VisitorToken   string            `json:"visitor_token"`
+	Contact        domain.ContactRef `json:"contact"`
+	WSToken        string            `json:"ws_token"`
+	GatewayURL     string            `json:"gateway_url"`
 }
 
 func setup(t *testing.T) (*hdtest.Env, hdtest.WS) {

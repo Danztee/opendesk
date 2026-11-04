@@ -266,10 +266,11 @@ type widgetSessionInput struct {
 
 type widgetSession struct {
 	Body struct {
-		VisitorToken string            `json:"visitor_token"`
-		Contact      domain.ContactRef `json:"contact"`
-		WSToken      string            `json:"ws_token"`
-		GatewayURL   string            `json:"gateway_url"`
+		VisitorToken   string            `json:"visitor_token"`
+		Contact        domain.ContactRef `json:"contact"`
+		WSToken        string            `json:"ws_token"`
+		GatewayURL     string            `json:"gateway_url"`
+		EmailCollected bool              `json:"email_collected" doc:"The visitor supplied an address, including an unverified address held by another contact"`
 	}
 }
 
@@ -532,6 +533,7 @@ func (h *handler) session(ctx context.Context, in *widgetSessionInput) (*widgetS
 			return err
 		}
 		out.Body.VisitorToken = token
+		out.Body.EmailCollected = widgetEmailCollected(c)
 		out.Body.Contact = domain.ContactRef{ID: c.ID, Email: c.Email, Name: c.Name, AvatarURL: c.AvatarURL}
 		out.Body.WSToken = wsToken
 		out.Body.GatewayURL = h.d.Cfg.GatewayURL + "/widget" // the widget socket, open to any origin
@@ -626,7 +628,14 @@ func (h *handler) fillContact(ctx context.Context, tx pgx.Tx, wid, id uuid.UUID,
 		if err != nil {
 			return err
 		}
-		if !taken {
+		if taken {
+			tag, err := tx.Exec(ctx, `UPDATE contacts SET custom = jsonb_set(custom, '{widget_email}', to_jsonb($3::text)), updated_at = now()
+				WHERE workspace_id = $1 AND id = $2 AND email IS NULL AND custom->>'widget_email' IS DISTINCT FROM $3`, wid, id, email)
+			if err != nil {
+				return err
+			}
+			changed = changed || tag.RowsAffected() > 0
+		} else {
 			tag, err := tx.Exec(ctx, `UPDATE contacts SET email = $3, updated_at = now() WHERE workspace_id = $1 AND id = $2 AND email IS NULL`, wid, id, email)
 			if err != nil {
 				return err
@@ -678,4 +687,13 @@ func widgetPicture(ctx context.Context, d *deps.Deps, tx pgx.Tx, wid, cid uuid.U
 		return err
 	}
 	return images.Enqueue(ctx, tx, d.Jobs, jobs.AvatarFetchArgs{Owner: images.OwnerContact, ID: cid, WorkspaceID: wid})
+}
+
+// widgetEmailCollected recognizes supplied addresses without linking an unverified visitor to another contact.
+func widgetEmailCollected(c domain.Contact) bool {
+	if c.Email != nil && *c.Email != "" {
+		return true
+	}
+	claimed, _ := c.Custom["widget_email"].(string)
+	return claimed != ""
 }

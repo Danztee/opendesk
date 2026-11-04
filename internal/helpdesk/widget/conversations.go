@@ -209,17 +209,8 @@ func (h *handler) registerConversations(api huma.API) {
 				if contact.Email != nil {
 					fromEmail = *contact.Email
 				}
-				if g.Settings.RequireEmail && fromEmail == "" {
-					// An address the visitor typed that another contact already holds is
-					// kept in custom.widget_email and counts as given.
-					var claimed bool
-					if err := tx.QueryRow(ctx, `SELECT COALESCE(custom->>'widget_email', '') <> '' FROM contacts WHERE workspace_id = $1 AND id = $2`,
-						p.WorkspaceID, p.ContactID).Scan(&claimed); err != nil {
-						return err
-					}
-					if !claimed {
-						return httpx.E(http.StatusUnprocessableEntity, "email_required", "Enter your email address to start a chat.")
-					}
+				if g.Settings.RequireEmail && !widgetEmailCollected(contact) {
+					return httpx.E(http.StatusUnprocessableEntity, "email_required", "Enter your email address to start a chat.")
 				}
 				subject := hd.Excerpt(body, 80)
 				if subject == "" {

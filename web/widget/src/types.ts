@@ -94,6 +94,8 @@ export type WidgetConfig = {
 export type WidgetTopic = { id: string; label: string };
 
 export type WidgetSession = {
+  /** Supplied address, even when another contact owns it. Older servers omit this. */
+  email_collected?: boolean;
   visitor_token: string;
   contact: ContactRef;
   ws_token: string;
