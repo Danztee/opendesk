@@ -653,8 +653,15 @@ func (s *svc) registerWorkspaces(api huma.API) {
 					if v, ok := patch["mail_enabled"].(bool); ok {
 						mail = v
 					}
-					if !tickets && !mail {
-						return httpx.E(422, "at_least_one_product_required", "At least one product must stay enabled.")
+					if !tickets {
+						state, err := products.Resolve(ctx, tx, s.d.Plan, s.d.Cfg.Collab, p.WorkspaceID,
+							products.Settings{TicketsEnabled: &tickets, MailEnabled: &mail})
+						if err != nil {
+							return err
+						}
+						if !state.Mail {
+							return httpx.E(422, "at_least_one_product_required", "At least one available product must stay enabled.")
+						}
 					}
 					if ticketsWasOff && tickets {
 						// Inbound email, calls and channel messages held while Tickets was off resume now.

@@ -165,6 +165,7 @@ export default function WorkspaceSettings() {
     );
   }
 
+  const mailUsable = ws.mail_disabled_reason !== "instance_disabled" && ws.mail_disabled_reason !== "plan";
   const base = toDraft(ws);
   const dirty = JSON.stringify(base) !== JSON.stringify(draft);
   const set = <K extends keyof Draft["settings"]>(k: K, v: Draft["settings"][K]) => setDraft({ ...draft, settings: { ...draft.settings, [k]: v } });
@@ -240,7 +241,7 @@ export default function WorkspaceSettings() {
               aria-label={t("workspace.productTickets")}
               checked={draft.settings.tickets_enabled}
               onCheckedChange={(v) => set("tickets_enabled", v)}
-              disabled={!canEdit || (draft.settings.tickets_enabled && !draft.settings.mail_enabled)}
+              disabled={!canEdit || (draft.settings.tickets_enabled && (!draft.settings.mail_enabled || !mailUsable))}
             />
           </Row>
           <Row
@@ -249,9 +250,9 @@ export default function WorkspaceSettings() {
           >
             <Switch
               aria-label={t("workspace.productMail")}
-              checked={draft.settings.mail_enabled}
+              checked={draft.settings.mail_enabled && mailUsable}
               onCheckedChange={(v) => set("mail_enabled", v)}
-              disabled={!canEdit || (draft.settings.mail_enabled && !draft.settings.tickets_enabled)}
+              disabled={!canEdit || !mailUsable || (draft.settings.mail_enabled && !draft.settings.tickets_enabled)}
             />
           </Row>
           {(!draft.settings.tickets_enabled || !draft.settings.mail_enabled) && (
