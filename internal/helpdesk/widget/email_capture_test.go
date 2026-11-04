@@ -26,5 +26,5 @@ func TestRequiredEmailCollisionCaptureAndResume(t *testing.T) {
 	}
 	auth := hdtest.Auth{Visitor: resumed.VisitorToken}
 	e.Do("POST", "/v1/widget/conversations", auth, map[string]any{"body": "Hello"}).Want(t, 201)
-	e.Do("GET", "/v1/widget/conversations/"+ticket["id"].(string), auth, nil).Want(t, 404)
+	e.Do("GET", "/v1/widget/conversations/"+ticket["conversation"].(map[string]any)["id"].(string)+"/messages", auth, nil).Want(t, 404)
 }
