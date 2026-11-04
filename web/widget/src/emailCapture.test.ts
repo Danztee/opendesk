@@ -8,7 +8,7 @@ it("lets the visitor continue after the API accepted an address held by another 
   const session: WidgetSession = {
     email_collected: true,
     visitor_token: "od_vis_review",
-    contact: { id: "visitor-review", name: "Visitor", email: null, avatar_url: null },
+    contact: { id: "visitor-review", name: "Visitor", email: null, avatar_url: "" },
     ws_token: "",
     gateway_url: "",
   };
