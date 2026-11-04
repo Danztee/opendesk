@@ -22,7 +22,7 @@ func TestAPIKeyRecordingWithBotAndScopes(t *testing.T) {
 	}
 	path := "/v1/api-keys/" + created.str("id")
 	off := c.do("PATCH", path, map[string]any{"record_requests": false})
-	if off.Status != 200 || off.str("bot_id") != bot.String() || off.Body["record_requests"] != false || len(off.Body["scopes"].([]any)) != 2 {
+	if off.Status != 200 || off.str("bot_id") != bot.String() || off.Body["record_requests"] != false || off.Body["error_count_24h"] != nil || len(off.Body["scopes"].([]any)) != 2 {
 		t.Fatalf("record-only update: %d %s", off.Status, off.Raw)
 	}
 	var audited bool

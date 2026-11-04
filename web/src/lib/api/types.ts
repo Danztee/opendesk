@@ -1030,6 +1030,8 @@ export type ApiKey = {
   private_teams?: PrivateTeamGrant[];
   /** Every request the key makes is recorded, kept 90 days (GET /v1/api-keys/{id}/requests). */
   record_requests?: boolean;
+  /** Recorded requests that failed (status 400 and up) in the last 24 hours; null when the key does not record. */
+  error_count_24h?: number | null;
   /** The bot the key speaks as on tickets (contracts/api.md "API keys"); null: it writes as itself. */
   bot_id?: string | null;
 };

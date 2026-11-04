@@ -40,6 +40,9 @@ type CoreAPIKey struct {
 	PrivateTeams []PrivateTeamGrant `json:"private_teams"`
 	// RecordRequests: every request the key makes is kept 90 days (GET /v1/api-keys/{id}/requests).
 	RecordRequests bool `json:"record_requests" doc:"Every request the key makes is recorded and kept 90 days"`
+	// ErrorCount24h counts the recorded requests that failed (status 400 and up) in the last
+	// 24 hours; null while the key does not record its requests.
+	ErrorCount24h *int `json:"error_count_24h" doc:"Recorded requests that failed (status 400 and up) in the last 24 hours; null when the key does not record its requests"`
 	// BotID is the bot the key speaks as: what it writes on tickets is shown and sent as that
 	// bot (contracts/bots.md). Null: it writes as itself.
 	BotID *uuid.UUID `json:"bot_id" doc:"The bot this key speaks as on tickets, or null"`
@@ -50,7 +53,9 @@ type CoreAPIKeyWithSecret struct {
 	Secret string `json:"secret" doc:"The full key. Shown once."`
 }
 
-var apiKeySelect = `SELECT k.id, k.name, k.prefix, k.scopes, k.last_used_at, k.expires_at, k.created_at, k.record_requests, k.bot_id,
+var apiKeySelect = `SELECT k.id, k.name, k.prefix, k.scopes, k.last_used_at, k.expires_at, k.created_at, k.record_requests,
+	CASE WHEN k.record_requests THEN (SELECT count(*)::int FROM api_key_requests r WHERE r.api_key_id = k.id
+		AND r.created_at > now() - interval '24 hours' AND r.status >= 400) END, k.bot_id,
 	u.id, u.name, u.email, u.avatar_url, ` + grantedTeamsSQL("k.private_team_ids", "k.workspace_id") + `,
 	` + teamGrantsSQL("k.private_team_ids", "k.workspace_id", grantAPIKey, "k.id") + `
 	FROM api_keys k LEFT JOIN users u ON u.id = k.created_by`
@@ -60,7 +65,7 @@ func scanAPIKey(r pgx.Row) (CoreAPIKey, error) {
 	var uid *uuid.UUID
 	var name, email, avatar *string
 	var grants []byte
-	if err := r.Scan(&k.ID, &k.Name, &k.Prefix, &k.Scopes, &k.LastUsedAt, &k.ExpiresAt, &k.CreatedAt, &k.RecordRequests, &k.BotID, &uid, &name, &email, &avatar,
+	if err := r.Scan(&k.ID, &k.Name, &k.Prefix, &k.Scopes, &k.LastUsedAt, &k.ExpiresAt, &k.CreatedAt, &k.RecordRequests, &k.ErrorCount24h, &k.BotID, &uid, &name, &email, &avatar,
 		&k.PrivateTeamIDs, &grants); err != nil {
 		return k, err
 	}

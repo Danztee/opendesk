@@ -251,7 +251,8 @@ type ChangelogEntry = { id: string; title: string /* 1..200 */; slug: string /* 
   created_at: string; updated_at: string };
 type ApiKey = { id: string; name: string; prefix: string; scopes: string[]; last_used_at: string | null; expires_at: string | null; created_at: string; created_by: UserRef | null;
   bot_id: string | null /* the bot the key speaks as on tickets ("API keys" below); null: it writes as itself */;
-  record_requests: boolean /* every request the key makes is recorded, kept 90 days ("API keys" below) */ };
+  record_requests: boolean /* every request the key makes is recorded, kept 90 days ("API keys" below) */;
+  error_count_24h: number | null /* recorded failures in the last 24 hours, null when recording is off */ };
 type ApiKeyRequest = { id: string; created_at: string; method: string; path: string; query: string /* secret-looking parameters masked */; status: number; duration_ms: number;
   idempotency_key: string; replayed: boolean /* an idempotent replay */; ticket: { id: string; number: number | null } | null /* the ticket the path or the answer named */;
   ticket_ref: string /* the ticket as the path named it: an id or a number, as written */; message_id: string | null; contact_id: string | null };
