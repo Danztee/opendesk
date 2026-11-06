@@ -25,10 +25,12 @@
       }
     },
     "col": {
-      "key": "Clé et autorisations",
+      "key": "Clé",
       "lastUsed": "Dernière utilisation",
       "expires": "Expiration",
-      "createdBy": "Créée par"
+      "createdBy": "Créée par",
+      "scopes": "Droits",
+      "log": "Journal"
     },
     "state": {
       "active": "Active",
@@ -68,6 +70,69 @@
     },
     "scopeFull": "accès complet",
     "scopeRead": "lecture seule",
+    "expiry": {
+      "menu": "Modifier l’expiration",
+      "title": "Expiration de {{name}}",
+      "current": "Expire actuellement le {{date}}.",
+      "currentNever": "N’expire jamais actuellement.",
+      "onDate": "À une date",
+      "date": "Date",
+      "future": "Choisissez un jour après aujourd’hui.",
+      "save": "Enregistrer l’expiration",
+      "widenNeedsSignIn": "Une date plus tardive, ou aucune, demande une connexion récente, comme pour créer une clé.",
+      "cell": "Modifier l’expiration de {{name}}"
+    },
+    "requests": {
+      "menu": "Journal des requêtes",
+      "title": "Journal des requêtes de {{name}}",
+      "hint": "Requêtes conservées 90 jours avec des diagnostics sûrs. Les modifications des tickets partagés incluent le JSON complet avec les secrets masqués. La visibilité des tickets reste applicable.",
+      "recording": "Journal actif",
+      "recordingHint": "Chaque requête de cette clé est gardée 90 jours. À voir dans le menu de la clé, Journal des requêtes.",
+      "recordOn": "Enregistrer les requêtes",
+      "recordOff": "Arrêter d’enregistrer les requêtes",
+      "recordError": "Impossible de changer l’enregistrement",
+      "off": "L’enregistrement est coupé : les requêtes de cette clé ne sont pas gardées.",
+      "turnOn": "Activer l’enregistrement",
+      "filterAll": "Toutes",
+      "filterErrors": "Erreurs",
+      "ticketPlaceholder": "Ticket : numéro ou id",
+      "ticketLabel": "Filtrer par ticket",
+      "refresh": "Actualiser",
+      "empty": "Aucune requête pour l’instant",
+      "emptyHint": "Les requêtes s’affichent ici dès que la clé en fait.",
+      "emptyFiltered": "Aucune requête ne correspond",
+      "loadMore": "Charger les requêtes plus anciennes",
+      "loadError": "Impossible de charger les requêtes",
+      "back": "Toutes les requêtes",
+      "openTicket": "Ouvrir le ticket n° {{number}}",
+      "col": {
+        "when": "Quand",
+        "request": "Requête",
+        "status": "Statut",
+        "ticket": "Ticket"
+      },
+      "detail": {
+        "when": "Quand",
+        "duration": "Durée",
+        "ticket": "Ticket",
+        "message": "Message",
+        "contact": "Contact",
+        "idempotency": "Clé d’idempotence",
+        "replayed": "Rejouée",
+        "replayedYes": "Oui : même Idempotency-Key, répondue avec la réponse de la première requête",
+        "requestId": "Id de requête",
+        "ip": "Adresse IP",
+        "userAgent": "User agent",
+        "content": "Contenu",
+        "sent": "Envoyé",
+        "noBody": "Aucun JSON de ticket partagé conservé pour cette requête.",
+        "answer": "Réponse",
+        "answerNotKept": "La réponse d’une requête réussie n’est pas gardée : ce qu’elle a touché est indiqué ci-dessus.",
+        "truncated": "La capture dépasse {{size}}. Seules les données de diagnostic sûres sont conservées."
+      },
+      "sinceLabel": "Depuis le {{when}}",
+      "sinceClear": "Afficher toutes les dates"
+    },
     "bot": {
       "label": "Parle en tant que",
       "hint": "Les réponses et notes que cette clé écrit sur les tickets s’affichent et partent au nom de ce bot : son nom, son visage et sa signature d’e-mail. Pour une IA à vous qui répond aux clients.",
@@ -85,6 +150,42 @@
       "save": "Enregistrer les autorisations",
       "changes": "Changements",
       "addingNeedsSignIn": "Ajouter une autorisation demande une connexion récente, comme pour créer une clé."
+    },
+    "list": {
+      "resource": {
+        "tickets": "Tickets",
+        "contacts": "Contacts",
+        "kb": "Articles",
+        "changelog": "Changelog",
+        "wiki": "Wiki",
+        "settings": "Réglages",
+        "realtime": "Temps réel",
+        "collab": "Collab"
+      },
+      "chip": "{{resource}} : {{access}}",
+      "access": {
+        "readWrite": "lecture et écriture",
+        "write": "écriture seule",
+        "read": "lecture seule",
+        "subscribe": "événements en direct (abonnement)",
+        "draft": "brouillons en votre nom"
+      },
+      "word": {
+        "subscribe": "abonnement",
+        "draft": "brouillons"
+      },
+      "full": "Accès complet",
+      "readOnly": "Lecture seule",
+      "more": "+{{count}}",
+      "edit": "Voir et modifier les autorisations",
+      "logOn": "Actif",
+      "logOff": "Requêtes non enregistrées",
+      "logOpen": "Ouvrir le journal des requêtes",
+      "errorsOpen": "Voir ces erreurs",
+      "errors_one": "{{count}} erreur en 24 h",
+      "errors_other": "{{count}} erreurs en 24 h",
+      "errors_many": "{{count}} erreurs en 24 h",
+      "expiredGroup": "Clés expirées ({{count}})"
     }
   },
   "webhooks": {

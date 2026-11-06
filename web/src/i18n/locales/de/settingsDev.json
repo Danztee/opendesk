@@ -24,10 +24,12 @@
       }
     },
     "col": {
-      "key": "Schlüssel und Berechtigungen",
+      "key": "Schlüssel",
       "lastUsed": "Zuletzt verwendet",
       "expires": "Läuft ab",
-      "createdBy": "Erstellt von"
+      "createdBy": "Erstellt von",
+      "scopes": "Rechte",
+      "log": "Protokoll"
     },
     "state": {
       "active": "Aktiv",
@@ -67,6 +69,69 @@
     },
     "scopeFull": "Vollzugriff",
     "scopeRead": "nur lesen",
+    "expiry": {
+      "menu": "Ablauf ändern",
+      "title": "Ablauf von {{name}}",
+      "current": "Läuft derzeit am {{date}} ab.",
+      "currentNever": "Läuft derzeit nie ab.",
+      "onDate": "An einem Datum",
+      "date": "Datum",
+      "future": "Wählen Sie einen Tag nach heute.",
+      "save": "Ablauf speichern",
+      "widenNeedsSignIn": "Ein späteres Datum oder keines erfordert eine kürzliche Anmeldung, wie beim Erstellen eines Schlüssels.",
+      "cell": "Ablauf von {{name}} ändern"
+    },
+    "requests": {
+      "menu": "Anfrageprotokoll",
+      "title": "Anfrageprotokoll von {{name}}",
+      "hint": "Anfragen werden 90 Tage mit sicheren Diagnosedaten gespeichert. Gemeinsame Ticket-Änderungen enthalten vollständiges JSON mit maskierten Geheimnissen. Die Ticket-Sichtbarkeit gilt weiterhin.",
+      "recording": "Protokoll aktiv",
+      "recordingHint": "Jede Anfrage dieses Schlüssels wird 90 Tage aufbewahrt. Zu sehen im Menü des Schlüssels, Anfrageprotokoll.",
+      "recordOn": "Anfragen aufzeichnen",
+      "recordOff": "Aufzeichnung beenden",
+      "recordError": "Aufzeichnung konnte nicht geändert werden",
+      "off": "Die Aufzeichnung ist aus: Anfragen dieses Schlüssels werden nicht aufbewahrt.",
+      "turnOn": "Aufzeichnung einschalten",
+      "filterAll": "Alle",
+      "filterErrors": "Fehler",
+      "ticketPlaceholder": "Ticket: Nummer oder ID",
+      "ticketLabel": "Nach Ticket filtern",
+      "refresh": "Aktualisieren",
+      "empty": "Noch keine Anfragen",
+      "emptyHint": "Anfragen erscheinen hier, sobald der Schlüssel welche stellt.",
+      "emptyFiltered": "Keine passende Anfrage",
+      "loadMore": "Ältere Anfragen laden",
+      "loadError": "Anfragen konnten nicht geladen werden",
+      "back": "Alle Anfragen",
+      "openTicket": "Ticket #{{number}} öffnen",
+      "col": {
+        "when": "Wann",
+        "request": "Anfrage",
+        "status": "Status",
+        "ticket": "Ticket"
+      },
+      "detail": {
+        "when": "Wann",
+        "duration": "Dauer",
+        "ticket": "Ticket",
+        "message": "Nachricht",
+        "contact": "Kontakt",
+        "idempotency": "Idempotenzschlüssel",
+        "replayed": "Wiederholt",
+        "replayedYes": "Ja: derselbe Idempotency-Key, beantwortet mit der Antwort der ersten Anfrage",
+        "requestId": "Anfrage-ID",
+        "ip": "IP-Adresse",
+        "userAgent": "User-Agent",
+        "content": "Inhalt",
+        "sent": "Gesendet",
+        "noBody": "Für diese Anfrage wurde kein gemeinsames Ticket-JSON gespeichert.",
+        "answer": "Antwort",
+        "answerNotKept": "Die Antwort auf eine erfolgreiche Anfrage wird nicht aufbewahrt: was sie betroffen hat, steht oben.",
+        "truncated": "Die Erfassung überschritt {{size}}. Nur sichere Diagnosedaten werden gespeichert."
+      },
+      "sinceLabel": "Seit {{when}}",
+      "sinceClear": "Alle Daten anzeigen"
+    },
     "bot": {
       "label": "Spricht als",
       "hint": "Antworten und Notizen, die dieser Schlüssel in Tickets schreibt, erscheinen und gehen als dieser Bot raus: mit seinem Namen, seinem Gesicht und seiner E-Mail-Grußformel. Für eine eigene KI, die Kunden antwortet.",
@@ -84,6 +149,41 @@
       "save": "Berechtigungen speichern",
       "changes": "Änderungen",
       "addingNeedsSignIn": "Eine Berechtigung hinzuzufügen erfordert eine aktuelle Anmeldung, wie beim Erstellen eines Schlüssels."
+    },
+    "list": {
+      "resource": {
+        "tickets": "Tickets",
+        "contacts": "Kontakte",
+        "kb": "Artikel",
+        "changelog": "Changelog",
+        "wiki": "Wiki",
+        "settings": "Einstellungen",
+        "realtime": "Echtzeit",
+        "collab": "Collab"
+      },
+      "chip": "{{resource}}: {{access}}",
+      "access": {
+        "readWrite": "lesen und schreiben",
+        "write": "nur schreiben",
+        "read": "nur lesen",
+        "subscribe": "Live-Ereignisse (abonnieren)",
+        "draft": "entwirft Antworten in Ihrem Namen"
+      },
+      "word": {
+        "subscribe": "abonnieren",
+        "draft": "Entwürfe"
+      },
+      "full": "Vollzugriff",
+      "readOnly": "Nur lesen",
+      "more": "+{{count}}",
+      "edit": "Berechtigungen ansehen und ändern",
+      "logOn": "Aktiv",
+      "logOff": "Anfragen werden nicht aufgezeichnet",
+      "logOpen": "Anfrageprotokoll öffnen",
+      "errorsOpen": "Diese Fehler anzeigen",
+      "errors_one": "{{count}} Fehler in 24 Std.",
+      "errors_other": "{{count}} Fehler in 24 Std.",
+      "expiredGroup": "Abgelaufene Schlüssel ({{count}})"
     }
   },
   "webhooks": {

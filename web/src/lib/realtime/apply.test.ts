@@ -36,7 +36,7 @@ describe("picture and workspace events", () => {
 
   it("applies workspace.updated to the cache and the session", () => {
     const qc = new QueryClient();
-    const w = { id: "w1", name: "Acme", avatar_url: "https://api.test/v1/images/logo" } as Workspace;
+    const w = { id: "w1", name: "Acme", mail_available: true, avatar_url: "https://api.test/v1/images/logo" } as Workspace;
     useSession.setState({ memberships: [{ workspace: { ...w, avatar_url: null }, role: "admin" }], workspaceId: "w1" });
     applyEnvelope(qc, env(3, { type: "workspace.updated", data: { workspace: w } }), { me: "u1" });
     expect(qc.getQueryData<Workspace>(qk.workspace)?.avatar_url).toBe(w.avatar_url);
@@ -229,6 +229,7 @@ describe("third-party threads", () => {
     ticket_id: "t1",
     subject: "Payout for order 1182",
     include_history: false,
+    forward_message_id: null,
     to: ["ops@acquirer.test"],
     cc: [],
     mailbox_id: "mb1",

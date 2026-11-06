@@ -24,6 +24,7 @@ import (
 	"github.com/useopendesk/opendesk/internal/httpx"
 	"github.com/useopendesk/opendesk/internal/ids"
 	"github.com/useopendesk/opendesk/internal/jobs"
+	"github.com/useopendesk/opendesk/internal/products"
 	"github.com/useopendesk/opendesk/internal/supportchannels/channel"
 )
 
@@ -110,6 +111,9 @@ func (w *inboundWorker) Work(ctx context.Context, j *river.Job[jobs.SupportChann
 		// Waiting for an earlier command is not a failure: it uses no attempt.
 		return river.JobSnooze(2 * time.Second)
 	}
+	if errors.Is(err, products.ErrHeld) {
+		return products.SnoozeHeld(err)
+	}
 	return snoozeRateLimit(err)
 }
 
@@ -131,10 +135,7 @@ func (s *Service) dispatch(ctx context.Context, a jobs.SupportChannelDispatchArg
 	if err != nil {
 		return err
 	}
-	if ticketID == nil {
-		return nil
-	}
-	if privateTeam != nil {
+	if ticketID == nil || privateTeam != nil || noteOnly(typ, data) {
 		return nil
 	}
 	t, err := domain.LoadTicket(ctx, s.d.DB.Pool, a.WorkspaceID, *ticketID)
@@ -664,6 +665,12 @@ func (s *Service) processInbound(ctx context.Context, a jobs.SupportChannelInbou
 	if err = json.Unmarshal(raw, &in); err != nil {
 		s.d.Log.Warn("support channel event is unreadable", "connection_id", c.ID)
 		return s.finishInbound(ctx, a)
+	}
+	// Linking an identity is not ticket work; everything else waits, stored, for Tickets.
+	if in.Command != "link" {
+		if err = products.Hold(ctx, s.d.DB.Pool, c.WorkspaceID); err != nil {
+			return err
+		}
 	}
 	adapter, ok := s.registry.Get(c.Provider)
 	if !ok {

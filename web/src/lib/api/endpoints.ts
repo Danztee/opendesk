@@ -149,6 +149,8 @@ export type StartThreadBody = {
   include_history?: boolean;
   /** Attachments of the customer's conversation to send along. */
   forward_attachment_ids?: string[];
+  /** One email of the ticket to forward in full (header, layout, inline images); not with include_history. */
+  forward_message_id?: string;
 };
 
 /** How a Google or Microsoft connection receives mail. */
@@ -393,9 +395,12 @@ export const api = {
     test: (b: RoutingTestBody) => http.post<T.RoutingTest>("/v1/routing/test", b),
   },
   apiKeys: {
-    ...crud<T.ApiKey, { name: string; scopes: string[]; expires_at?: string | null; private_team_ids?: string[]; bot_id?: string | null }>("/v1/api-keys"),
-    create: (b: { name: string; scopes: string[]; expires_at?: string | null; private_team_ids?: string[]; bot_id?: string | null }) =>
+    ...crud<T.ApiKey, { name: string; scopes: string[]; expires_at?: string | null; private_team_ids?: string[]; record_requests?: boolean; bot_id?: string | null }>("/v1/api-keys"),
+    create: (b: { name: string; scopes: string[]; expires_at?: string | null; private_team_ids?: string[]; record_requests?: boolean; bot_id?: string | null }) =>
       http.create<T.ApiKey & { secret: string }>("/v1/api-keys", b),
+    /** The key's recorded requests, newest first (admins; "Record requests" on the key). */
+    requests: (id: string, q?: ListQuery & T.ApiKeyRequestFilter) => http.get<T.Page<T.ApiKeyRequest>>(`/v1/api-keys/${id}/requests`, { query: q }),
+    request: (id: string, requestId: string) => http.get<T.ApiKeyRequestDetail>(`/v1/api-keys/${id}/requests/${requestId}`),
   },
   /** Settings > AI clients: opendesk's MCP server and the clients connected with OAuth. */
   aiClients: {

@@ -66,6 +66,7 @@ func TestPortalTicketOwnership(t *testing.T) {
 	team := ids.New()
 	e.Exec(`INSERT INTO teams(id,workspace_id,name,private) VALUES($1,$2,'Private team',true)`, team, ws.ID)
 	e.Exec(`UPDATE tickets SET team_id=$2, custom='{"secret":"internal"}',last_message_preview='private preview' WHERE id=$1`, own.ID, team)
+	portalMessage(t, e, ws, own, "note", "internal note text")
 	otherContact := ids.New()
 	e.Exec(`INSERT INTO contacts(id,workspace_id,email,name) VALUES($1,$2,'other@example.com','Other')`, otherContact, ws.ID)
 	other := portalTicket(t, e, ws, otherContact, domain.StatusOpen)
@@ -87,7 +88,8 @@ func TestPortalTicketOwnership(t *testing.T) {
 	r := e.Do("GET", portalTickets+"/"+own.ID.String(), customer, nil).Want(t, 200)
 	m := r.Map(t)
 	delete(m, "$schema")
-	if len(m) != 6 || m["id"] != own.ID.String() || strings.Contains(string(r.Body), "private preview") || strings.Contains(string(r.Body), "internal") {
+	if len(m) != 6 || m["id"] != own.ID.String() || strings.Contains(string(r.Body), "private preview") || strings.Contains(string(r.Body), "internal") ||
+		strings.Contains(string(r.Body), "last_note") {
 		t.Fatalf("ticket DTO: %s", r.Body)
 	}
 	rows, next := pageRows(t, e.Do("GET", portalTickets+"?workspace_id="+otherWS.ID.String()+"&contact_id="+otherContact.String(), customer, nil))
@@ -240,4 +242,24 @@ func TestPortalReply(t *testing.T) {
 			}
 		})
 	}
+}
+
+// With Tickets off the portal answers feature_disabled for sign-in and requests, and keeps
+// its brand readable.
+func TestTicketsOffRefusesPortal(t *testing.T) {
+	e, ws, cid, access := ticketSession(t)
+	ticket := portalTicket(t, e, ws, cid, "open")
+	e.SetSettings(ws, map[string]any{"tickets_enabled": false})
+
+	var out struct{ Code, Product string }
+	e.Do("GET", portalTickets, access, nil).Want(t, 403).JSON(t, &out)
+	if out.Code != "feature_disabled" || out.Product != "tickets" {
+		t.Fatalf("%+v", out)
+	}
+	e.Do("GET", portalTickets+"/"+ticket.ID.String(), access, nil).Want(t, 403)
+	e.Do("POST", base(ws)+"/auth/login", hdtest.Auth{}, map[string]any{"email": "x@example.com", "password": password}).Want(t, 403)
+	e.Do("GET", base(ws)+"/config", hdtest.Auth{}, nil).Want(t, 200)
+
+	e.SetSettings(ws, map[string]any{"tickets_enabled": true})
+	e.Do("GET", portalTickets, access, nil).Want(t, 200)
 }

@@ -26,6 +26,8 @@ type ApiKey = {
   expires_at: string | null;
   created_at: string;
   created_by: UserRef | null;
+  record_requests: boolean; // every request the key makes is recorded, kept 90 days
+  error_count_24h: number | null; // recorded failures in the last 24 hours, null when recording is off
   bot_id: string | null; // the bot the key speaks as on tickets, or null
 };
 ```
@@ -39,6 +41,39 @@ curl https://api.opendesk.sh/v1/api-keys \
 ```
 
 The response is the key plus `secret`, shown only this once. See [scopes](/api/authentication/#scopes).
+
+### Record a key's requests
+
+To check afterwards what an integration did, turn on `record_requests` when you create the key, or later:
+
+```sh
+curl -X PATCH https://api.opendesk.sh/v1/api-keys/$KEY_ID \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "OD-Workspace: $WORKSPACE_ID" \
+  -H "Content-Type: application/json" \
+  -d '{ "record_requests": true }'
+```
+
+From the key's next request, each request it makes is kept for 90 days:
+
+- when, the method, path and query, the status and how long it took, the `Idempotency-Key` and whether the answer was a replay;
+- for single-ticket create/update and message create/edit, complete JSON up to 64 KB with secret fields masked; other writes keep type and size;
+- for a failure (status 400 and up), the HTTP status, a known diagnostic code and validation-error count;
+- the ticket, message and contact it touched.
+
+Private mail, drafts, bulk operations and account/provider settings keep metadata only. Incomplete or malformed JSON is replaced by `***`. Path parameters use the route template unless they are UUIDs or numeric references. Queries keep valid pagination limits and `expand=messages`; other values are omitted or masked. Failure diagnostics omit rejected values and free-form error text.
+
+Fields named like secrets (`secret`, `token`, `password`, `api_key`, `credential`…) are masked as `***`, and the `Authorization` header is never kept. Recording happens after the answer and never slows down or fails a request.
+
+Read the record with `GET /v1/api-keys/{id}/requests`, newest first. Filter with `status=4xx` (or `2xx`, `5xx`, or `errors` for every failure, 400 and up), `method`, `since` and `until` (RFC 3339), and `ticket` (its id, its number, or the reference your path used). `GET /v1/api-keys/{id}/requests/{requestId}` gives one request with what it sent and the answer. Admins only, from the app; an API key can't read it. A revoked key's record stays readable. Ticket records follow current ticket visibility: admins outside a private team cannot read its records, and deleted tickets' records are unavailable.
+
+```sh
+curl "https://api.opendesk.sh/v1/api-keys/$KEY_ID/requests?status=4xx" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "OD-Workspace: $WORKSPACE_ID"
+```
+
+In the app: **Settings → API keys**, the key's menu, **Record requests**. The list's **Log** column then shows **On** and the key's failures of the last 24 hours: **On** opens the request log, the failure count opens it on those failures. The key's `error_count_24h` gives the same count (`null` while it does not record).
 
 ### Speak as a bot
 
@@ -75,6 +110,21 @@ curl -X PATCH https://api.opendesk.sh/v1/api-keys/$KEY_ID   -H "Authorization: B
 - Each change is in the audit log as `api_key.scopes_changed`, with the scopes before and after, and what was added and removed.
 
 In the app: **Settings → API keys**, the key's menu, **Edit permissions**.
+
+### Change a key's expiry
+
+Send `expires_at` with `PATCH /v1/api-keys/{id}`: a date in the future, or `null` for a key that never expires. The secret stays the same.
+
+```sh
+curl -X PATCH https://api.opendesk.sh/v1/api-keys/$KEY_ID   -H "Authorization: Bearer $ACCESS_TOKEN"   -H "OD-Workspace: $WORKSPACE_ID"   -H "Content-Type: application/json"   -d '{ "expires_at": null }'
+```
+
+- **An earlier date** applies at once.
+- **A later date, or none**, keeps a live credential working longer, so it asks for what creating a key asks for: a sign-in within the last 12 hours, and the second factor when it is on (`403 reauth_required` / `mfa_required`).
+- A date in the past is refused (`422`): to stop a key now, revoke it. An expired key can't be brought back (`422`): create a new one.
+- Each change is in the audit log as `api_key.expiry_changed`, with the date before and after (`null` for never).
+
+In the app: **Settings → API keys**, the key's menu, **Change expiry**, or the key's expiry date in the list.
 
 ## Webhooks
 

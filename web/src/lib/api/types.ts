@@ -25,6 +25,10 @@ export type TimeFormat = "auto" | "12h" | "24h";
 export type UserRef = { id: string; name: string; email: string; avatar_url: string | null };
 
 export type WorkspaceSettings = {
+  /** Whether ticketing is enabled for this workspace. Defaults to true. */
+  tickets_enabled?: boolean;
+  /** Whether Mail is enabled for this workspace. Defaults to true; effective availability is Workspace.mail_available. */
+  mail_enabled?: boolean;
   brand_color?: string;
   timezone?: string;
   help_center_enabled?: boolean;
@@ -77,6 +81,8 @@ export type Workspace = {
   slug: string;
   widget_key: string;
   settings: WorkspaceSettings;
+  mail_available: boolean;
+  mail_disabled_reason?: "instance_disabled" | "plan" | "workspace_disabled";
   /** The workspace logo. */
   avatar_url: string | null;
   avatar_source: "upload" | null;
@@ -425,12 +431,24 @@ export type Ticket = {
   /** The customer's public messages since the last reply; 0 once anyone (or the AI agent) replied. */
   unanswered_count: number;
   last_message_preview: string;
+  /** The newest internal note a member or an API key wrote on the ticket (not a side conversation's, not Ollie's); null when none. */
+  last_note: TicketLastNote | null;
   message_count: number;
   spam: boolean;
   csat: { score: number; comment: string } | null;
   custom: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+};
+
+export type TicketLastNote = {
+  id: string;
+  /** The start of the note's text, whitespace collapsed, up to 200 characters. */
+  preview: string;
+  /** name is what to show; user is the member, null for an API key. */
+  author: { type: "user" | "api"; name: string; user: UserRef | null };
+  created_at: string;
+  edited_at: string | null;
 };
 
 export type Attachment = {
@@ -513,6 +531,8 @@ export type Thread = {
   status: "open" | "closed";
   /** The first message quoted the ticket's conversation with the customer. */
   include_history: boolean;
+  /** The email of the ticket the first message forwarded in full; null when none (or it is gone). */
+  forward_message_id: string | null;
   created_by: UserRef | null;
   message_count: number;
   last_message_at: string;
@@ -1022,9 +1042,48 @@ export type ApiKey = {
   created_by: UserRef | null;
   private_team_ids?: string[];
   private_teams?: PrivateTeamGrant[];
+  /** Every request the key makes is recorded, kept 90 days (GET /v1/api-keys/{id}/requests). */
+  record_requests?: boolean;
+  /** Recorded requests that failed (status 400 and up) in the last 24 hours; null when the key does not record. */
+  error_count_24h?: number | null;
   /** The bot the key speaks as on tickets (contracts/api.md "API keys"); null: it writes as itself. */
   bot_id?: string | null;
 };
+/** A request an API key made while "Record requests" was on. */
+export type ApiKeyRequest = {
+  id: string;
+  created_at: string;
+  method: string;
+  path: string;
+  /** Secret-looking parameters masked. */
+  query: string;
+  status: number;
+  duration_ms: number;
+  idempotency_key: string;
+  /** The answer was an idempotent replay of an earlier request. */
+  replayed: boolean;
+  /** The ticket the path or the answer named; number null once the ticket is gone. */
+  ticket: { id: string; number: number | null } | null;
+  /** The ticket as the path named it: an id or a number, as written. */
+  ticket_ref: string;
+  message_id: string | null;
+  contact_id: string | null;
+};
+export type ApiKeyRequestDetail = ApiKeyRequest & {
+  request_id: string;
+  ip: string;
+  user_agent: string;
+  content_type: string;
+  request_size: number;
+  /** The JSON a write sent, secret-looking fields masked, up to 64 KB; null for reads and other bodies. */
+  request_body: string | null;
+  request_truncated: boolean;
+  /** The answer to a failed request (400 and up), up to 8 KB. */
+  response_body: string | null;
+  response_truncated: boolean;
+};
+/** status errors: every failure, 400 and up. since: RFC 3339, made at or after. */
+export type ApiKeyRequestFilter = { status?: "2xx" | "4xx" | "5xx" | "errors"; method?: string; ticket?: string; since?: string };
 export type Webhook = {
   id: string;
   url: string;
@@ -2510,7 +2569,7 @@ export type EmailLayoutOptions = {
   font: "system" | "sans" | "serif";
   footer_html: string;
   history: "none" | "last" | "all";
-  /** "" is the default "On {{ message.date }}, {{ message.author }} wrote:". */
+  /** Takes {{ message.author }}, {{ message.email }} and {{ message.date }}; "" is the default "On {{ message.date }}, {{ message.author }} wrote:". */
   history_header: string;
 };
 export type EmailTemplate = {
@@ -2965,7 +3024,7 @@ export type MailPersonFile = { thread_id: string; message_id: string; sent_at: s
 export type CollabStatus = {
   enabled: boolean;
   /** Why not: not on the plan, or off on this instance. */
-  reason: "plan" | "disabled" | null;
+  reason: "plan" | "disabled" | "workspace_disabled" | null;
   providers: { google: boolean; microsoft: boolean; imap: boolean };
   /** Accounts the caller sees. */
   accounts: number;

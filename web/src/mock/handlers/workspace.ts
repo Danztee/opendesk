@@ -1,7 +1,7 @@
 // Workspaces, members, invitations, teams, API keys, webhooks, audit log,
 // events, realtime tokens and notifications. Widget settings: handlers/widget.ts.
 
-import type { ApiKey, Member, Role, Webhook, WebhookDelivery, WorkspaceSettings } from "@/lib/api/types";
+import type { ApiKey, ApiKeyRequestDetail, Member, Role, Webhook, WebhookDelivery, WorkspaceSettings } from "@/lib/api/types";
 import { profileOf } from "../profiles";
 import { db, me, userRef, type WsData } from "../db";
 import { publish } from "../gateway";
@@ -99,7 +99,11 @@ export function registerWorkspace() {
     }
     if (isRecord(ctx.body.settings)) {
       const wasGravatar = !!ctx.ws.workspace.settings.gravatar;
-      ctx.ws.workspace.settings = { ...ctx.ws.workspace.settings, ...(ctx.body.settings as WorkspaceSettings) };
+      const next = { ...ctx.ws.workspace.settings, ...(ctx.body.settings as WorkspaceSettings) };
+      if (next.tickets_enabled === false && next.mail_enabled === false)
+        throw invalid("At least one product must stay enabled.");
+      ctx.ws.workspace.settings = next;
+      ctx.ws.workspace.mail_available = next.mail_enabled !== false;
       // Turning Gravatar pictures off removes them (contracts/api.md "Profile pictures and logos").
       if (wasGravatar && !ctx.ws.workspace.settings.gravatar)
         for (const c of ctx.ws.contacts)
@@ -225,8 +229,11 @@ export function registerWorkspace() {
   });
 
   // API keys: the secret is only returned on create.
-  get("/v1/api-keys", (ctx) => paginate(ctx, ctx.ws.apiKeys, 100));
-  get("/v1/api-keys/:id", (ctx) => ctx.ws.apiKeys.find((k) => k.id === ctx.params.id) ?? (() => { throw notFound("API key"); })());
+  // Like the API: a recording key carries its failed requests of the last 24 hours (the mock's
+  // made-up log below has one), null otherwise.
+  const keyOut = (k: ApiKey): ApiKey => ({ ...k, error_count_24h: k.record_requests ? (k.error_count_24h ?? 1) : null });
+  get("/v1/api-keys", (ctx) => paginate(ctx, ctx.ws.apiKeys.map(keyOut), 100));
+  get("/v1/api-keys/:id", (ctx) => keyOut(ctx.ws.apiKeys.find((k) => k.id === ctx.params.id) ?? (() => { throw notFound("API key"); })()));
   post("/v1/api-keys", (ctx) => {
     requireAdmin(ctx.ws);
     // Like the API: a key needs the second factor (when on) and a sign-in within 12 hours.
@@ -253,14 +260,56 @@ export function registerWorkspace() {
       if (db.stepUp === "mfa_required") throw new HttpError(403, "mfa_required", "this action requires two-factor authentication");
       if (db.stepUp === "reauth_required") throw new HttpError(403, "reauth_required", "For your security, sign in again to do this. Your last sign-in is more than 12 hours old.");
     }
+    // A later expiry, or none, works like adding a scope: the same fresh sign-in. Earlier is at once.
+    if ("expires_at" in ctx.body) {
+      const to = (ctx.body.expires_at as string | null) ?? null;
+      const from = key.expires_at ?? null;
+      if (to !== null && Date.parse(to) <= Date.now()) throw new HttpError(422, "validation_failed", "expires_at must be in the future. To stop a key now, revoke it.");
+      if (from !== null && Date.parse(from) <= Date.now()) throw new HttpError(422, "validation_failed", "This key has expired and can't be brought back. Create a new key.");
+      const widens = to === null ? from !== null : from !== null && Date.parse(to) > Date.parse(from);
+      if (widens && db.stepUp === "mfa_required") throw new HttpError(403, "mfa_required", "this action requires two-factor authentication");
+      if (widens && db.stepUp === "reauth_required") throw new HttpError(403, "reauth_required", "For your security, sign in again to do this. Your last sign-in is more than 12 hours old.");
+      if (to !== from) {
+        key.expires_at = to;
+        audit(ctx.ws, "api_key.expiry_changed", "api_key", key.id, { from, to });
+      }
+    }
     assign(key, ctx.body, ["name", "scopes"]);
     if (scopes && (scopes.length !== before.length || scopes.some((sc) => !before.includes(sc))))
       audit(ctx.ws, "api_key.scopes_changed", "api_key", key.id, { from: before, to: key.scopes });
     if ("private_team_ids" in ctx.body) setGrants(ctx.ws, key, privateTeams(ctx, key.private_team_ids ?? []));
+    if (typeof ctx.body.record_requests === "boolean") key.record_requests = ctx.body.record_requests;
     if ("bot_id" in ctx.body) key.bot_id = keyBot(ctx, key.scopes);
     audit(ctx.ws, "api_key.updated", "api_key", key.id, { fields: Object.keys(ctx.body) });
-    return key;
+    return keyOut(key);
   });
+  // A recording key's requests: made-up ones, newest first, shaped like the API's.
+  const keyRequests = (ctx: Ctx): ApiKeyRequestDetail[] => {
+    const key = ctx.ws.apiKeys.find((k) => k.id === ctx.params.id);
+    if (!key) throw notFound("API key");
+    if (!key.record_requests) return [];
+    const ticket = ctx.ws.tickets[0];
+    const at = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+    const base = { query: "", idempotency_key: "", replayed: false, message_id: null, contact_id: null, request_id: "req_mock", ip: "203.0.113.7",
+      user_agent: "returns-portal/1.4", content_type: "application/json", request_size: 0, request_body: null, request_truncated: false,
+      response_body: null, response_truncated: false, ticket: ticket ? { id: ticket.id, number: ticket.number } : null, ticket_ref: "" };
+    return [
+      { ...base, id: `${key.id}-r1`, created_at: at(2), method: "POST", path: `/v1/tickets/${ticket?.number ?? 1}/messages`, status: 201, duration_ms: 84,
+        ticket_ref: String(ticket?.number ?? 1), message_id: uuid(), request_body: JSON.stringify({ kind: "note", body_html: "<p>Return R-1042 received</p>" }) },
+      { ...base, id: `${key.id}-r2`, created_at: at(9), method: "POST", path: "/v1/tickets/999999/messages", status: 404, duration_ms: 12, ticket: null,
+        ticket_ref: "999999", request_body: JSON.stringify({ kind: "note", body_html: "<p>Linked to return R-1041</p>" }),
+        response_body: JSON.stringify({ status: 404, code: "not_found", detail: "Ticket not found" }) },
+      { ...base, id: `${key.id}-r3`, created_at: at(31), method: "GET", path: `/v1/tickets/${ticket?.number ?? 1}`, status: 200, duration_ms: 23, content_type: "", ticket_ref: String(ticket?.number ?? 1) },
+    ];
+  };
+  get("/v1/api-keys/:id/requests", (ctx) => {
+    const status = ctx.query.get("status");
+    const since = ctx.query.get("since");
+    const ok = (r: ApiKeyRequestDetail) =>
+      (!status || (status === "errors" ? r.status >= 400 : String(r.status)[0] === status[0])) && (!since || r.created_at >= since);
+    return paginate(ctx, keyRequests(ctx).filter(ok).map(({ request_body: _b, response_body: _r, ...row }) => row));
+  });
+  get("/v1/api-keys/:id/requests/:requestId", (ctx) => keyRequests(ctx).find((r) => r.id === ctx.params.requestId) ?? (() => { throw notFound("Request"); })());
   del("/v1/api-keys/:id", (ctx) => {
     requireAdmin(ctx.ws);
     ctx.ws.apiKeys = ctx.ws.apiKeys.filter((k) => k.id !== ctx.params.id);
