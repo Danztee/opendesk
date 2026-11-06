@@ -1,9 +1,10 @@
 package widget_test
 
 import (
+	"testing"
+
 	"github.com/google/uuid"
 	"github.com/useopendesk/opendesk/internal/helpdesk/hdtest"
-	"testing"
 )
 
 func TestRequiredEmailCollisionCaptureAndResume(t *testing.T) {
