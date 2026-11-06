@@ -228,3 +228,14 @@ export function defaultRouting(): RoutingState {
 export function contactRef(c: Contact) {
   return { id: c.id, email: c.email, name: c.name, avatar_url: c.avatar_url };
 }
+
+/**
+ * The team can start a chat with them (contracts/api.md "Tickets"): not blocked, and verified
+ * in a widget, or a visitor known only from the chat (every ticket of theirs is a chat).
+ */
+export function chatReachable(ws: WsData, c: Contact): boolean {
+  if (c.blocked) return false;
+  if (c.external_id) return true;
+  const theirs = ws.tickets.filter((t) => t.contact?.id === c.id);
+  return theirs.some((t) => t.channel === "chat") && theirs.every((t) => t.channel === "chat");
+}
