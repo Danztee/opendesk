@@ -3,14 +3,17 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
 	"github.com/useopendesk/opendesk/internal/domain"
+	"github.com/useopendesk/opendesk/internal/helpdesk/hd"
 	"github.com/useopendesk/opendesk/internal/jobs"
 )
 
@@ -259,16 +262,46 @@ func TestWidgetAgent(t *testing.T) {
 	}
 	e.settings(map[string]any{"widget_max_replies": 20})
 
-	// The monthly cap stops the agent and notifies owners and admins once.
+	// The monthly cap stops the agent and notifies owners and admins once. Each chat it leaves
+	// goes to the workspace's chat assignment (contracts/api.md "Assignment").
+	var mu sync.Mutex
+	var offered, declined []uuid.UUID
+	hd.SetChatAssigner(func(_ context.Context, _ pgx.Tx, _, tid uuid.UUID) (*uuid.UUID, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		offered = append(offered, tid)
+		return nil, nil
+	})
+	t.Cleanup(func() { hd.SetChatAssigner(nil) })
 	e.settings(map[string]any{"widget_monthly_cap_usd": 0.01})
 	for i := 0; i < 2; i++ {
 		_, tid9, _ := widgetConversation(e, "How do I reset my password?")
+		declined = append(declined, tid9)
 		before = e.F.calls()
 		e.runWidgetJobs()
 		if e.F.calls() != before || len(publicMessages(e, tid9)) != 1 {
 			t.Fatal("answered over the cap")
 		}
 	}
+	// Under the cap, a provider failing leaves the chat to the chat assignment too.
+	e.settings(map[string]any{"widget_monthly_cap_usd": 0})
+	e.F.fail(529, 529, 529, 529, 529, 529, 529, 529, 529)
+	_, tid10, _ := widgetConversation(e, "How do I reset my password?")
+	declined = append(declined, tid10)
+	e.runWidgetJobs()
+	e.F.mu.Lock()
+	e.F.failures = nil
+	e.F.mu.Unlock()
+	if len(publicMessages(e, tid10)) != 1 {
+		t.Fatal("answered while the provider failed")
+	}
+	mu.Lock()
+	if !slices.Equal(offered, declined) {
+		t.Fatalf("chats offered to the chat assignment %v, want %v", offered, declined)
+	}
+	mu.Unlock()
+	hd.SetChatAssigner(nil)
+	e.settings(map[string]any{"widget_monthly_cap_usd": 0.01})
 	if n := e.count(`SELECT count(*) FROM notifications WHERE workspace_id = $1 AND type = 'ai_cap_reached'`, e.WS.ID); n != 2 {
 		t.Fatalf("cap notifications %d (owner and admin, once)", n)
 	}
