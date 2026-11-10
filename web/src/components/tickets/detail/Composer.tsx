@@ -39,6 +39,7 @@ import { SharedDraftBar } from "./SharedDraft";
 import { useReplyDraftSync } from "./replyDraft";
 import { backToNote, deliver, hold, undoSeconds as undoSecondsFor, useUnsent, type Upload } from "./outbox";
 import { EmailChips, SavedReplyButton, UploadChip, uploadFiles } from "./composerParts";
+import { mergeReplyActions, ReplyActionChips, replyActionLabels } from "./ReplyActions";
 import { NoFollowUpSender } from "./NoFollowUpSender";
 import { addressLabel, followUpMailbox, fromLine, replyAddresses, TeamDot, useTeamsCtx, type TeamsCtx } from "../teams";
 import { AccountDot } from "@/components/collab/bits";
@@ -73,6 +74,8 @@ type Draft = {
   threadForward?: string;
   /** The note this reply is written from: it is removed once the reply is sent. */
   fromNote?: string;
+  /** Saved replies used: their actions apply to the ticket once the message is sent. */
+  savedReplyIds?: string[];
 };
 
 // Drafts survive switching tickets (memory only).
@@ -273,8 +276,17 @@ export const Composer = forwardRef<
   // In a side conversation the server fills them without the customer's or the ticket's details.
   // A reply that can't be filled goes in as written (the server fills it on send).
   const [filling, setFilling] = useState(0);
-  const insertSavedReply = useCallback((html: string, clear?: () => void) => {
+  const insertSavedReply = useCallback((html: string, clear?: () => void, replyId?: string) => {
     clear?.();
+    // Its actions go with the message, once sent.
+    if (replyId && modeRef.current !== "thread") {
+      const tid = ticketRef.current;
+      useDrafts.setState((s) => {
+        const d = s[tid] ?? emptyDraft;
+        const used = d.savedReplyIds ?? [];
+        return used.includes(replyId) ? {} : { [tid]: { ...d, savedReplyIds: [...used, replyId] } };
+      });
+    }
     if (modeRef.current === "note") return editor.current?.insertHtml(html);
     const id = ticketRef.current;
     setFilling((n) => n + 1);
@@ -291,7 +303,7 @@ export const Composer = forwardRef<
   const extensions = useMemo(
     () => [
       mentionExtension(() => membersRef.current, () => modeRef.current === "note"),
-      savedReplyExtension(() => repliesRef.current, insertSavedReply),
+      savedReplyExtension(() => repliesRef.current, (html, clear, replyId) => insertSavedReply(html, clear, replyId)),
       templateExtension({
         known: () => knownRef.current,
         items: (query) => matchVars(varItemsRef.current, query, (g) => g),
@@ -399,7 +411,7 @@ export const Composer = forwardRef<
     [setDraft],
   );
   const dropShared = useCallback(() => {
-    setDraft({ html: "" });
+    setDraft({ html: "", savedReplyIds: undefined });
     editor.current?.clear();
   }, [setDraft]);
 
@@ -526,7 +538,7 @@ export const Composer = forwardRef<
       void backToNote(tempMessage({ kind: "note", body_html: draft.html }, `tmp-${Date.now().toString(36)}`), draft.fromNote, draft.html, attachments, me);
       uploads.forEach((u) => u.preview && URL.revokeObjectURL(u.preview));
       setUploads([]);
-      setDraft({ html: "", cc: [], bcc: [], showCc: false, mailboxId: undefined, fromAccount: undefined, fromNote: undefined, mode: "reply" });
+      setDraft({ html: "", cc: [], bcc: [], showCc: false, mailboxId: undefined, fromAccount: undefined, fromNote: undefined, savedReplyIds: undefined, mode: "reply" });
       editor.current?.clear();
       ai.dismissSources();
       return;
@@ -544,6 +556,7 @@ export const Composer = forwardRef<
           ? { account_id: personalSender.account.id, email: personalSender.identity.email, reply_to: personalFrom.replyTo || undefined }
           : undefined,
       from_note_id: reply ? draft.fromNote : undefined,
+      saved_reply_ids: draft.savedReplyIds?.length ? draft.savedReplyIds : undefined,
     };
     const tempId = `tmp-${Date.now().toString(36)}`;
     retries.current.set(tempId, body);
@@ -565,7 +578,7 @@ export const Composer = forwardRef<
     setSentWith(status);
     setSent(true);
     setUploads([]);
-    setDraft({ html: "", cc: [], bcc: [], showCc: false, mailboxId: undefined, fromAccount: undefined, fromNote: undefined, ...(opts.as ? { mode: "reply" } : {}) });
+    setDraft({ html: "", cc: [], bcc: [], showCc: false, mailboxId: undefined, fromAccount: undefined, fromNote: undefined, savedReplyIds: undefined, ...(opts.as ? { mode: "reply" } : {}) });
     editor.current?.clear();
     ai.dismissSources();
     // A held reply's toast says what it will do; it sets the status only once it is sent.
@@ -655,7 +668,7 @@ export const Composer = forwardRef<
               size="xs"
               variant="ghost"
               onClick={() => {
-                setDraft({ html: "", fromNote: undefined });
+                setDraft({ html: "", fromNote: undefined, savedReplyIds: undefined });
                 editor.current?.clear();
               }}
             >
@@ -900,7 +913,7 @@ export const Composer = forwardRef<
                       <Paperclip className="size-[15px]" />
                     </button>
                   </Tooltip>
-                  <SavedReplyButton replies={replies} filling={filling > 0} onPick={(r) => insertSavedReply(r.body_html)} />
+                  <SavedReplyButton replies={replies} filling={filling > 0} onPick={(r) => insertSavedReply(r.body_html, undefined, r.id)} />
                   {emailReply && (
                     <Tooltip content={draft.html ? t("composer.previewEmail") : t("composer.previewEmpty")}>
                       <button
@@ -934,6 +947,12 @@ export const Composer = forwardRef<
           </div>
           {!threadMode && <ComposerSources ai={ai} />}
           {!threadMode && <ComposerAiStatus ai={ai} />}
+          {!threadMode && !!draft.savedReplyIds?.length && (
+            <ReplyActionChips
+              labels={replyActionLabels(mergeReplyActions(allReplies ?? [], draft.savedReplyIds), (id) => teams.team(id)?.name, members ?? [])}
+              onDrop={() => setDraft({ savedReplyIds: undefined })}
+            />
+          )}
           {(uploads.length > 0 || (starting && (include.history || include.picked.length > 0))) && (
             <div className="flex flex-wrap gap-1.5 px-3 pb-2.5">
               {starting && <SideIncludedChips inc={include} />}

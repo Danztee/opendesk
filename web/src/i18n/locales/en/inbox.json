@@ -630,6 +630,8 @@
     "replyToSearch": "Type an address",
     "replyToEmpty": "Type an email address",
     "replyToUse": "Use",
+    "replyActions": "When sent:",
+    "dropReplyActions": "Remove these actions",
     "chatReply": "In the chat · by email if the visitor has left",
     "chatReplyHint": "Your reply appears live in the visitor's chat. If they have left the page (no activity for 2 minutes), it is also sent to their email address a minute later, unless they come back.",
     "chatReplyHere": "In the chat",

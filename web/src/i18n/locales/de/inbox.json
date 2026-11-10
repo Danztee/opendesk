@@ -626,6 +626,8 @@
     "replyToSearch": "Adresse eingeben",
     "replyToEmpty": "E-Mail-Adresse eingeben",
     "replyToUse": "Verwenden",
+    "replyActions": "Beim Senden:",
+    "dropReplyActions": "Diese Aktionen entfernen",
     "chatReply": "Im Chat · per E-Mail, falls der Besucher gegangen ist",
     "chatReplyHint": "Ihre Antwort erscheint sofort im Chat des Besuchers. Hat er die Seite verlassen (2 Minuten ohne Aktivität), geht sie eine Minute später zusätzlich an seine E-Mail-Adresse, außer er kommt zurück.",
     "chatReplyHere": "Im Chat",
