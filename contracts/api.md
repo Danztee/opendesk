@@ -630,6 +630,7 @@ Each value is overridable: `NOTIFY_EMAIL_DELAY`, `NOTIFY_EMAIL_COOLDOWNS` (e.g. 
 | POST | `/v1/contacts/bulk` | agent, `contacts:write`. `{ids /* 1..100 */ | query, patch: {add_tags?, remove_tags?, company_id? /* null clears */} | delete: true}` → `{updated, deleted}`. `query` is the People list's filters (`q`, `company_id`, `tag`, `blocked`) and acts on at most 1000 contacts (`422 too_many_records` beyond). Exactly one of `ids` and `query`, and one of `patch` and `delete`. All or nothing: an id outside the workspace is `404`, a company outside it `422`, and nothing changes. Each record is audited (`contact.updated`, `contact.deleted`, with `bulk: true`) and announced (`contact.updated`, `contact.deleted`). A deleted contact's tickets stay, without a contact |
 | POST | `/v1/contacts/{id}/emails` | agent (`contacts:write`). `{email}` → `201 Contact`: gives the contact an extra address ("Contact emails"). An address that belongs to any contact in the workspace, primary or extra, this contact's included, is `409`; at most 20 extras (`422`) |
 | DELETE | `/v1/contacts/{id}/emails/{email}` | agent (`contacts:write`) → `Contact`; takes an extra address off (`404` when it is not one; the primary is changed with `PATCH`) |
+| POST | `/v1/contacts/{id}/merge` | admin (`contacts:write`). `{into: contact_id}` → `Contact` (the one that stays): merges the contact in the path into `into` ("Merging contacts"). `422` for the same contact, a blocked one with a not blocked one (`contacts_blocked_differ`), or more than 20 extra addresses together; `409 external_id_conflict` for two different external ids; `404` for an unknown contact |
 | POST | `/v1/contacts/{id}/emails/{email}/make-primary` | agent (`contacts:write`) → `Contact`; swaps an extra address with the primary (`404` when it is not an extra). Customer-portal credentials end, as for any change of `email` |
 | CRUD | `/v1/companies`, `/v1/companies/{id}` | list supports `q`, `tag`, `field.<key>` and `sort` (`name` A to Z, the default; `-name`, `created`, `-created`, `contacts`, `-contacts`); write bodies take `external_id?` (`null` clears it; taken by another company: `409`), `tags?`, `add_tags?`, `remove_tags?`, `fields?` as contacts |
 | POST | `/v1/companies/bulk` | as contacts: `{ids | query: {q, tag}, patch: {add_tags?, remove_tags?} | delete: true}` → `{updated, deleted}`. A deleted company's people stay, without a company |
@@ -791,6 +792,24 @@ writer (`409` on any attempt, `PATCH` and `POST /v1/contacts` included).
 - Extras sit beside a primary address: a contact without one gets no extras, and the primary of a
   contact with extras can't be cleared (`422`; make an extra the primary instead).
 - `contact.updated` carries the contact with its `emails`.
+
+#### Merging contacts
+
+`POST /v1/contacts/{id}/merge` folds one contact into another when they are one person, in one
+transaction, and cannot be undone. The contact in the path is removed; `into` stays.
+
+- Moves to the contact that stays: tickets, messages the contact wrote, calls, uploads and labels
+  (the union). Its primary and extra addresses become extra addresses of the one that stays ("Contact emails"), so
+  mail from any of them lands there from then on.
+- The one that stays keeps its name, phone, company, external id and primary email, and takes the removed one's where
+  it has none (its primary address then becomes the stayer's primary). Notes are joined (the stayer's first), and
+  `custom` and `fields` merged with the stayer's winning.
+- The removed contact's customer-portal sign-in and sessions, and its chat widget sessions, end with it: a browser
+  holding one never reads the stayer's conversations.
+- Refused: the same contact; a blocked and a not blocked contact (block or unblock first); two different
+  `external_id`s, which are two identities the host product vouches for.
+- Audit entry `contact.merged` (with the removed id and the number of tickets), events `contact.deleted` (removed),
+  `contact.updated` (stayer) and `ticket.updated` for each moved ticket.
 
 #### Drafts
 

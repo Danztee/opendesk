@@ -25,7 +25,7 @@ import { isOneEmoji } from "@/components/tickets/ViewIcon";
 import { viewIconDef } from "@/components/tickets/viewIcons";
 import { chatReachable, db, userRef, type WsData } from "../db";
 import { publish } from "../gateway";
-import { HttpError, del, get, invalid, notFound, paginate, patch, post, required, respond, s, strArr, type Ctx } from "../router";
+import { HttpError, del, forbidden, get, invalid, notFound, paginate, patch, post, required, respond, s, strArr, type Ctx } from "../router";
 import { applyLabels, canCreateLabels, fieldFiltersFromQuery, fieldsText, matchFields, mergeFields } from "../labels";
 import { addActivity, publishTicketUpdated, sortTickets } from "../tickets";
 import { isRecord, nowIso, randomToken, slugify, uuid } from "../util";
@@ -231,6 +231,35 @@ export function registerResources() {
     c.emails = [...c.emails.filter((x) => x !== email), ...(c.email ? [c.email] : [])];
     c.email = email;
     return changed(ctx, c);
+  });
+  // Merging a contact into another (contracts/api.md "Merging contacts"): admins only.
+  post("/v1/contacts/:id/merge", (ctx) => {
+    if (!isAdmin(ctx.ws, db.meId)) throw forbidden("Only admins can merge contacts");
+    const from = findContact(ctx);
+    const into = ctx.ws.contacts.find((x) => x.id === s(ctx, "into"));
+    if (!into) throw notFound("Contact");
+    if (into.id === from.id) throw invalid("a contact can't be merged into itself");
+    if (from.blocked !== into.blocked) throw new HttpError(422, "contacts_blocked_differ", "A blocked contact can't be merged with one that is not blocked.");
+    if (from.external_id && into.external_id && from.external_id !== into.external_id) throw new HttpError(409, "external_id_conflict", "These contacts have different external ids.");
+    const addresses = [...(from.email ? [from.email] : []), ...from.emails];
+    // A contact without a primary address takes the other's first one as its primary.
+    const primary = into.email ?? addresses.shift() ?? null;
+    if (into.emails.length + addresses.length > 20) throw invalid("the merged contact would have more than 20 extra email addresses");
+    into.email = primary;
+    into.emails.push(...addresses);
+    into.name ||= from.name;
+    into.phone ||= from.phone;
+    into.external_id ??= from.external_id;
+    if (!into.company && from.company) into.company = from.company;
+    if (from.notes.trim()) into.notes = into.notes.trim() ? `${into.notes.trimEnd()}\n\n${from.notes}` : from.notes;
+    into.custom = { ...from.custom, ...into.custom };
+    into.fields = { ...from.fields, ...into.fields };
+    for (const tag of from.tags) if (!into.tags.some((x) => x.id === tag.id)) into.tags.push(tag);
+    for (const t of ctx.ws.tickets) if (t.contact?.id === from.id) t.contact = { id: into.id, email: into.email, name: into.name, avatar_url: into.avatar_url };
+    into.ticket_count = ctx.ws.tickets.filter((t) => t.contact?.id === into.id).length;
+    ctx.ws.contacts = ctx.ws.contacts.filter((x) => x !== from);
+    publish(ctx.ws, "contact.deleted", { contact_id: from.id });
+    return respond(200, changed(ctx, into));
   });
   get("/v1/contacts/:id/tickets", (ctx) => {
     const c = findContact(ctx);

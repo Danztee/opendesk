@@ -648,6 +648,8 @@ export const api = {
     ...crud<T.Contact, Partial<Pick<T.Contact, "name" | "email" | "phone" | "notes" | "external_id" | "blocked" | "custom">> & { company_id?: string | null } & LabelWrites>("/v1/contacts"),
     search: (q: ContactListQuery) => http.get<T.Page<T.Contact>>("/v1/contacts", { query: listQuery(q) }),
     tickets: (id: string, q?: ListQuery) => http.get<T.Page<T.Ticket>>(`/v1/contacts/${id}/tickets`, { query: q }),
+    /** Merges the contact into another (admin): its tickets, messages and addresses become `into`'s, and it is removed. */
+    merge: (id: string, into: string) => http.post<T.Contact>(`/v1/contacts/${id}/merge`, { into }),
     bulk: (b: DirectoryBulkTarget<ContactBulkQuery> & ({ delete: true } | { patch: { add_tags?: string[]; remove_tags?: string[]; company_id?: string | null } })) =>
       http.post<BulkResult>("/v1/contacts/bulk", b),
     /** Extra addresses (contracts/api.md "Contact emails"); each answers with the contact. */
