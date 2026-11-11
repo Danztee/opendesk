@@ -2,7 +2,11 @@
 // the owning area registers the worker (see internal/app). River runs them on Postgres.
 package jobs
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // Queues.
 const (
@@ -63,6 +67,17 @@ type SyncMailboxArgs struct {
 }
 
 func (SyncMailboxArgs) Kind() string { return "email.sync_mailbox" }
+
+// ScheduledReplyArgs sends a member's scheduled reply draft when it is due. SendAt is the time
+// it was scheduled for: a draft rescheduled or cancelled since is left alone. Owner: helpdesk.
+type ScheduledReplyArgs struct {
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+	TicketID    uuid.UUID `json:"ticket_id"`
+	UserID      uuid.UUID `json:"user_id"`
+	SendAt      time.Time `json:"send_at"`
+}
+
+func (ScheduledReplyArgs) Kind() string { return "helpdesk.scheduled_reply" }
 
 // Provider tidy-up actions (ProviderTidyArgs.Action).
 const (
