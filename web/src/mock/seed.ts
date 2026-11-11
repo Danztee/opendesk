@@ -131,6 +131,7 @@ export function baseWorkspace(id: string, name: string, slug: string): WsData {
     companies: [],
     tickets: [],
     deletedTickets: new Set(),
+    deletedTicketInfo: new Map(),
     mergedInto: new Map(),
     messages: [],
     threads: [],
