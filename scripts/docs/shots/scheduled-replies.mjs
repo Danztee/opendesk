@@ -9,5 +9,6 @@ export const shots = [{
     await page.getByRole('menuitem', { name: 'Send later', exact: true }).click();
     await page.getByRole('button', { name: 'Schedule reply', exact: true }).click();
     await page.getByRole('button', { name: 'Cancel schedule', exact: true }).waitFor();
+    await page.evaluate(() => { for (const img of document.images) if (!img.complete) img.remove(); });
   },
 }];
