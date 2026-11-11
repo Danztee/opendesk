@@ -79,6 +79,18 @@ type ScheduledReplyArgs struct {
 
 func (ScheduledReplyArgs) Kind() string { return "helpdesk.scheduled_reply" }
 
+// SentCopyArgs stores a copy of an email a mailbox sent in its IMAP sent folder (IMAP
+// APPEND). StorageKey holds the message as it went out; the job removes it. Owner: email.
+type SentCopyArgs struct {
+	WorkspaceID uuid.UUID `json:"workspace_id"`
+	MailboxID   uuid.UUID `json:"mailbox_id"`
+	StorageKey  string    `json:"storage_key"`
+	// SentAt is when the email went out: the copy's date in the folder.
+	SentAt time.Time `json:"sent_at"`
+}
+
+func (SentCopyArgs) Kind() string { return "email.sent_copy" }
+
 // Provider tidy-up actions (ProviderTidyArgs.Action).
 const (
 	// ProviderImported: an email read through the provider's API became a ticket message.
