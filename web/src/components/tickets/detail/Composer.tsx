@@ -431,13 +431,13 @@ export const Composer = forwardRef<
 
   const wasScheduled = useRef(false);
   useEffect(() => {
-    if (wasScheduled.current && ownDraft.draft === null) {
+    if (wasScheduled.current && ownDraft.draft === null && mode === "reply") {
       setDraft({ html: "", cc: [], bcc: [], savedReplyIds: undefined });
       editor.current?.clear();
       setUploads([]);
     }
     wasScheduled.current = !!ownDraft.draft?.schedule;
-  }, [ownDraft.draft, setDraft]);
+  }, [ownDraft.draft, setDraft, mode]);
 
   // Presence: "replying" while a draft exists, "viewing" otherwise.
   const hasDraft = !!draft.html;
@@ -659,7 +659,7 @@ export const Composer = forwardRef<
           />
         )}
         {!disabled && <SharedDraftBar ticket={ticket} html={draft.html} onUse={takeShared} onClear={dropShared} hold={!ownDraft.settled} />}
-        <ScheduledReplyControls ticketId={ticket.id} draft={ownDraft.draft} onSent={() => { setDraft({ html: "" }); editor.current?.clear(); setUploads([]); }} />
+        {mode === "reply" && <ScheduledReplyControls ticketId={ticket.id} draft={ownDraft.draft} onSent={() => { if (modeRef.current === "reply") { setDraft({ html: "" }); editor.current?.clear(); setUploads([]); } }} />}
         <ScheduleReplyDialog open={scheduleOpen} onOpenChange={setScheduleOpen} busy={scheduleReply.isPending} onSchedule={(at) => submit(undefined, { sendAt: at })} />
         <AnimatePresence initial={false}>
           {others.length > 0 && mode === "reply" && (
