@@ -337,7 +337,11 @@ func (s *service) deliver(ctx context.Context, m *mailboxRow, out *outMessage, e
 		}
 		ep := smtpEndpoint{host: m.Config.SMTPHost, port: m.Config.SMTPPort, mode: m.Config.SMTPTLS, user: m.Config.SMTPUsername,
 			pass: creds.smtpPassword(), guarded: true, helo: s.heloName(), allowNoTLS: s.guard.allowPrivate, authRequired: true}
-		return out.MessageID, s.sendSMTP(ctx, ep, &envelope{from: envFrom, rcpts: rcpts, raw: raw})
+		if err := s.sendSMTP(ctx, ep, &envelope{from: envFrom, rcpts: rcpts, raw: raw}); err != nil {
+			return out.MessageID, err
+		}
+		s.keepSentCopy(ctx, m, raw)
+		return out.MessageID, nil
 	case KindGoogle:
 		raw, err := buildMIME(out, true)
 		if err != nil {
@@ -363,7 +367,11 @@ func (s *service) deliver(ctx context.Context, m *mailboxRow, out *outMessage, e
 		if err != nil {
 			return "", err
 		}
-		return out.MessageID, s.sendSystem(ctx, &envelope{from: envFrom, rcpts: rcpts, raw: raw})
+		if err := s.sendSystem(ctx, &envelope{from: envFrom, rcpts: rcpts, raw: raw}); err != nil {
+			return out.MessageID, err
+		}
+		s.keepSentCopy(ctx, m, raw)
+		return out.MessageID, nil
 	}
 	return "", permanent("The mailbox has no way to send email.")
 }
@@ -471,10 +479,9 @@ func (s *service) composeAndSend(ctx context.Context, wid, mid, ticketID uuid.UU
 		if t.contactEmail == nil || *t.contactEmail == "" {
 			return "", nil, permanent("The customer has no email address.")
 		}
-		to = []string{*t.contactEmail}
-	}
-	if to, err = domain.ReplyRecipients(ctx, s.d.DB.Pool, wid, ticketID, t.contactEmail, to); err != nil {
-		return "", nil, err
+		if to, err = domain.ReplyRecipients(ctx, s.d.DB.Pool, wid, ticketID, t.contactEmail, []string{*t.contactEmail}); err != nil {
+			return "", nil, err
+		}
 	}
 	alias := m.alias(t.receivedAt)
 	names := t.names

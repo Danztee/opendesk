@@ -19,10 +19,11 @@ import { buildRow, NavItemRow, RowEmoji, rowNumber, useMailLocation, useRowLabel
 import { useWaitingFor } from "@/components/tickets/useUrgentChats";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { MailAccount, MailBox, MailCounts, MailFolder, SidebarPin, SidebarPrefs, SidebarSectionId, View, ViewIcon } from "@/lib/api/types";
-import { accountAssignedNumbers, accountNumbers, allInboxNumbers, folderNumbers, listBoxNumbers, type RowNumbers } from "@/lib/collab/badges";
+import { accountAssignedNumbers, accountNumbers, allInboxNumbers, folderNumbers, handlingSpam, listBoxNumbers, tracksHandling, type RowNumbers } from "@/lib/collab/badges";
 import { ACCOUNT_BOXES, accountName, buildFolderTree, flattenTree, folderWithRole } from "@/lib/collab/boxes";
 import { useAllFolders, useMailAccounts, useSaveSidebarPrefs } from "@/lib/collab/hooks";
 import { badgeFor, hid, iconOf, livePins, nameOf, pickCount, toggleExpanded, type MailBadge } from "@/lib/collab/sidebarPrefs";
+import { dropOverCls, useThreadDrop } from "@/lib/collab/threadDrag";
 import { cn } from "@/lib/cn";
 import { q } from "@/lib/queries";
 import { useOpenWorkspaceData } from "@/lib/spaces/hooks";
@@ -98,6 +99,8 @@ function MailRow({
   const source: EditSource | undefined = rowKey
     ? { kind: "row", from: rowKey.startsWith("account:") ? "mail" : "mail:box", key: rowKey, pin, row: pin && pin.kind !== "view_section" ? { kind: pin.kind, id: pin.id } : undefined }
     : undefined;
+  // Conversations dragged from the list land here: moved, starred, marked or assigned (lib/collab/threadDrag.ts).
+  const drop = useThreadDrop(link);
   return (
     <SidebarRow id={`mail|${rowKey || target}`} source={source} label={name} edit={rowKey ? rowEdit(rowKey, label) : undefined} rail={rail}>
     <NavTip rail={rail} label={name}>
@@ -107,7 +110,8 @@ function MailRow({
         params={{ box: link.box, threadId: undefined }}
         search={{ account: link.account, folder: link.folder }}
         onClick={() => markOpener(target, "mail")}
-        className={cn(rowBase, rowShape(rail), lit ? rowActive : rowIdle)}
+        {...drop.props}
+        className={cn(rowBase, rowShape(rail), lit ? rowActive : rowIdle, drop.over && dropOverCls)}
         data-status={lit ? "active" : undefined}
         aria-current={active ? "page" : undefined}
         aria-label={rail ? label : undefined}
@@ -351,6 +355,13 @@ export function MailSection({ prefs, rail, first }: { prefs: SidebarPrefs; rail:
   // which has no rows under an account).
   const assignedIn = Object.entries(counts?.assigned ?? {}).filter(([, n]) => n > 0).map(([id]) => id);
   const assignedAcross = !!counts?.boxes.assigned && (rail || assignedIn.length > 1 || assignedIn.some((id) => !shown.some((a) => a.id === id)));
+  // Spam never reaches Needs action, so handling accounts show their unread spam after the work
+  // queues, and keep the row while it is open (contracts/collab.md "Spam beside Needs action").
+  const spam = handlingSpam(accounts, counts);
+  const atSpam = here.box === "spam" && !here.folder;
+  const openHandling = atSpam && (here.account ? !!accounts?.some((a) => a.id === here.account && tracksHandling(a)) : !!accounts?.some(tracksHandling));
+  const spamAccount = spam.n ? spam.account : here.account;
+  const spamRow = !hidden.has(hid.box("spam")) && (spam.n > 0 || openHandling);
   // With Handling on for a shared account the team works from queues: Ready for review,
   // Assigned to me, Needs action and Snoozed stay in sight even while empty, so people know
   // they exist (GH#430). Without it they show only while they hold something.
@@ -443,6 +454,18 @@ export function MailSection({ prefs, rail, first }: { prefs: SidebarPrefs; rail:
           rail={rail}
           prefs={prefs}
           menu={{ badge: { key: "box:snoozed", kind: "mail", sections: ["mail"] }, pin: { kind: "box", id: "snoozed" }, hideId: hid.box("snoozed") }}
+        />
+      )}
+      {spamRow && (
+        <MailRow
+          link={{ box: "spam", account: spamAccount }}
+          active={atSpam && here.account === spamAccount}
+          icon={boxIcon.spam}
+          label={t("box.spam")}
+          shown={mailShown(prefs, "box:spam", ["mail"], { unread: spam.n, total: spamAccount ? folderWithRole(folders[spamAccount], "spam")?.total : undefined })}
+          rail={rail}
+          prefs={prefs}
+          menu={{ badge: { key: "box:spam", kind: "mail", sections: ["mail"] }, pin: { kind: "box", id: "spam" }, hideId: hid.box("spam") }}
         />
       )}
       {shown.map((a) => (

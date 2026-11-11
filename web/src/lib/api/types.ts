@@ -974,6 +974,17 @@ export type ProviderSendAs = {
 export type AliasSettingsInput = { display_name?: string; signature_html?: string; brand_id?: string | null; send_as?: AliasSendAs };
 /** accounts: any of the member's addresses, shared accounts only, or addresses at the mailbox's own domains. */
 export type MailboxPersonalReplies = { enabled: boolean | null; reply_to: "address" | "mailbox" | null; accounts: "any" | "shared" | "domain" };
+/** A folder on a mailbox's IMAP server it can read (GET /v1/mailboxes/{id}/imap-folders). */
+export type ImapFolder = {
+  /** The folder's name on the server, as imap_folders takes it. */
+  name: string;
+  /** The name with / between levels, for showing. */
+  path: string;
+  /** What the server says the folder is for (SPECIAL-USE), or "". */
+  special: "" | "inbox" | "sent" | "drafts" | "trash" | "junk" | "archive" | "all" | "flagged" | "important";
+};
+export type ImapFolders = { folders: ImapFolder[]; selected: string[] };
+
 export type Mailbox = {
   id: string;
   name: string;
@@ -1015,6 +1026,10 @@ export type Mailbox = {
   trusted_form_senders?: string[];
   /** Mail marked automatic (Auto-Submitted, Precedence: bulk) is taken in instead of dropped; nothing automatic answers it. */
   keep_automatic_mail?: boolean;
+  /** The IMAP folders a mailbox that reads over IMAP takes mail from; empty reads INBOX alone (admins only). */
+  imap_folders?: string[];
+  /** The IMAP folder a copy of each email the mailbox sends over SMTP or through opendesk is kept in; "" keeps none (admins only). */
+  imap_sent_folder?: string;
   signature_html: string;
   auto_reply_enabled: boolean;
   auto_reply_subject: string;
@@ -1060,6 +1075,8 @@ export type KbArticle = {
   views: number;
   published_at: string | null;
   updated_at: string;
+  /** Its address on a help center, after the help center's own: /c/<collection slug>/<slug>, or /a/<slug> in no collection. */
+  path: string;
 };
 
 /** A product update the help center publishes at /changelog (contracts/api.md "Changelog"). */
@@ -3533,8 +3550,8 @@ export type MailThreadAction =
   | "snooze";
 
 export type MailCounts = {
-  /** Unread conversations; assigned, shared, needs_action, snoozed and ai_review: open ones. */
-  boxes: { inbox: number; unread: number; shared: number; assigned: number; drafts: number; needs_action: number; snoozed?: number; ai_review?: number };
+  /** Unread conversations; assigned, shared, needs_action, snoozed and ai_review: open ones; spam: unread ones in spam. */
+  boxes: { inbox: number; unread: number; shared: number; assigned: number; drafts: number; needs_action: number; snoozed?: number; ai_review?: number; spam?: number };
   accounts: Record<string, number>;
   folders: Record<string, number>;
   /** By account with aliases, then address (its own included): unread conversations in its inbox with it on a message; missing = 0. */
@@ -3545,6 +3562,8 @@ export type MailCounts = {
   categories?: Record<string, Record<string, number>>;
   /** boxes.ai_review by account; only accounts with some. */
   ai_review?: Record<string, number>;
+  /** boxes.spam by account: unread conversations in spam; only accounts with some (contracts/collab.md "Spam beside Needs action"). */
+  spam?: Record<string, number>;
 };
 
 /** `collab.changed` event data. */
