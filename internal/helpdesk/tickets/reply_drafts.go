@@ -195,7 +195,7 @@ func registerReplyDrafts(d *deps.Deps, api huma.API) {
 			if err != nil {
 				return nil, httpx.Wrap(err)
 			}
-			if _, err := d.DB.Pool.Exec(ctx, `DELETE FROM ticket_reply_drafts WHERE workspace_id = $1 AND ticket_id = $2 AND user_id = $3`,
+			if _, err := d.DB.Pool.Exec(ctx, `DELETE FROM ticket_reply_drafts WHERE workspace_id = $1 AND ticket_id = $2 AND user_id = $3 AND send_at IS NULL`,
 				p.WorkspaceID, tid, p.UserID); err != nil {
 				return nil, httpx.Wrap(err)
 			}

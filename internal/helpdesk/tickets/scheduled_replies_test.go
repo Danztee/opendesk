@@ -43,6 +43,12 @@ func TestScheduledReply(t *testing.T) {
 		AND scheduled_at BETWEEN $2::timestamptz - interval '1 second' AND $2::timestamptz + interval '1 second'`, tk.ID.String(), at) != 1 {
 		t.Fatal("no job at send_at")
 	}
+	// A delayed empty autosave cannot discard a scheduled reply.
+	e.Do("DELETE", base, as, nil).Want(t, 204)
+	e.Do("GET", base, as, nil).Want(t, 200).JSON(t, &got)
+	if got.Draft == nil || got.Draft.Schedule == nil {
+		t.Fatal("a delayed discard removed a scheduled reply")
+	}
 	// A scheduled reply is not edited in place, and refusals come before anything is kept.
 	e.Do("PUT", base, as, map[string]any{"body_html": "<p>changed</p>"}).Want(t, 409)
 	for name, body := range map[string]map[string]any{

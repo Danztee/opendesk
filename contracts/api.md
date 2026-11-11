@@ -866,7 +866,8 @@ The message timestamp is the actual send time. Jobs from a cancelled or moved sc
 nothing. Transient failures retry up to three attempts; a refused or exhausted send keeps the
 draft with `send_error`. Scheduled drafts are exempt from the 30-day draft purge. Sending
 another reply preserves a scheduled draft. Autosave refuses edits while scheduled (409);
-cancel first to edit. The app shows the scheduled time in the device timezone.
+cancel first to edit. A plain draft DELETE preserves a scheduled reply, so an empty autosave
+cannot cancel it. The app shows the scheduled time in the device timezone.
 
 #### Labels and custom fields
 

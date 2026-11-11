@@ -140,7 +140,7 @@ export function registerDrafts() {
   });
 
   del("/v1/tickets/:id/reply-draft", (ctx) => {
-    ownDrafts(ctx.ws).delete(ticketOf(ctx).id);
+    clearOwnDraft(ctx.ws, ticketOf(ctx));
     return respond(204);
   });
 
