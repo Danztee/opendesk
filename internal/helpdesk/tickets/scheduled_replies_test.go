@@ -29,7 +29,7 @@ func TestScheduledReply(t *testing.T) {
 	reply := map[string]any{"kind": "reply", "body_html": "<p>Here is the update you asked for.</p>", "status": "pending"}
 
 	at := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
-	e.Do("POST", base+"/schedule", as, map[string]any{"send_at": at, "reply": reply}).Want(t, 200).JSON(t, &got)
+	e.Do("POST", base+"/schedule", as, map[string]any{"send_at": at.Add(789 * time.Nanosecond), "reply": reply}).Want(t, 200).JSON(t, &got)
 	if got.Draft == nil || got.Draft.Schedule == nil || !got.Draft.Schedule.SendAt.Equal(at) || got.Draft.Schedule.Status == nil ||
 		*got.Draft.Schedule.Status != "pending" || !strings.Contains(got.Draft.BodyHTML, "the update") {
 		t.Fatalf("scheduled: %+v", got.Draft)
@@ -84,6 +84,18 @@ func TestScheduledReply(t *testing.T) {
 		t.Fatalf("draft after sending: %+v", got.Draft)
 	}
 
+	// Another reply sent meanwhile leaves a scheduled one in place.
+	e.Do("POST", base+"/schedule", as, map[string]any{"send_at": at, "reply": reply}).Want(t, 200)
+	e.Do("POST", "/v1/tickets/"+tk.ID.String()+"/messages", as, map[string]any{"kind": "reply", "body_html": "<p>A quick word first</p>"}).Want(t, 201)
+	e.Do("GET", base, as, nil).Want(t, 200).JSON(t, &got)
+	if got.Draft == nil || got.Draft.Schedule == nil {
+		t.Fatalf("another reply removed the scheduled one: %+v", got.Draft)
+	}
+	send(at)
+	if replies() != 3 {
+		t.Fatalf("replies %d after the scheduled one went out", replies())
+	}
+
 	// Cancelled: it stays a draft, and its job sends nothing.
 	e.Do("POST", base+"/schedule", as, map[string]any{"send_at": at, "reply": reply}).Want(t, 200)
 	e.Do("DELETE", base+"/schedule", as, nil).Want(t, 200).JSON(t, &got)
@@ -91,14 +103,14 @@ func TestScheduledReply(t *testing.T) {
 		t.Fatalf("cancelled: %+v", got.Draft)
 	}
 	send(at)
-	if replies() != 1 {
+	if replies() != 3 {
 		t.Fatal("a cancelled reply went out")
 	}
 
 	// Sent now instead.
 	e.Do("POST", base+"/schedule", as, map[string]any{"send_at": at, "reply": reply}).Want(t, 200)
 	e.Do("POST", base+"/send", as, nil).Want(t, 201)
-	if replies() != 2 {
+	if replies() != 4 {
 		t.Fatal("send now did not send")
 	}
 	e.Do("POST", base+"/send", as, nil).Want(t, 404)
@@ -118,7 +130,7 @@ func TestScheduledReply(t *testing.T) {
 	send(at)
 	e.Exec(`UPDATE members SET role = 'agent' WHERE workspace_id = $1 AND user_id = $2`, ws.ID, ws.Agent.ID)
 	e.Do("GET", base, as, nil).Want(t, 200).JSON(t, &got)
-	if replies() != 2 || got.Draft == nil || got.Draft.Schedule != nil || got.Draft.SendError == "" {
+	if replies() != 4 || got.Draft == nil || got.Draft.Schedule != nil || got.Draft.SendError == "" {
 		t.Fatalf("kept after a refused send: %+v", got.Draft)
 	}
 }

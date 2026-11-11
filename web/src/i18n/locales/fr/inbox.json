@@ -648,7 +648,17 @@
     "chatReply": "Dans le chat · par e-mail si le visiteur est parti",
     "chatReplyHint": "Votre réponse s’affiche en direct dans le chat du visiteur. S’il a quitté la page (aucune activité depuis 2 minutes), elle part aussi à son adresse e-mail une minute plus tard, sauf s’il revient.",
     "chatReplyHere": "Dans le chat",
-    "chatReplyAway": "Dans le chat · par e-mail s’il ne la lit pas"
+    "chatReplyAway": "Dans le chat · par e-mail s’il ne la lit pas",
+    "sendLater": "Envoyer plus tard",
+    "scheduleHint": "Choisissez une date entre une minute et un an à partir de maintenant ({{zone}}).",
+    "scheduleReply": "Programmer la réponse",
+    "sendDate": "Date d’envoi",
+    "sendTime": "Heure d’envoi",
+    "scheduledFor": "Envoi prévu le {{time}}",
+    "sendNow": "Envoyer maintenant",
+    "changeTime": "Modifier l’heure",
+    "cancelSchedule": "Annuler la programmation",
+    "scheduleReview": "Vérifiez les mentions et les champs à remplir avant de programmer cette réponse."
   },
   "sharedDraft": {
     "label": "Brouillon partagé",

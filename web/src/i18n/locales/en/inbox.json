@@ -635,7 +635,17 @@
     "chatReply": "In the chat · by email if the visitor has left",
     "chatReplyHint": "Your reply appears live in the visitor's chat. If they have left the page (no activity for 2 minutes), it is also sent to their email address a minute later, unless they come back.",
     "chatReplyHere": "In the chat",
-    "chatReplyAway": "In the chat · by email if they don't read it"
+    "chatReplyAway": "In the chat · by email if they don't read it",
+    "sendLater": "Send later",
+    "scheduleHint": "Choose a time between a minute and a year from now ({{zone}}).",
+    "scheduleReply": "Schedule reply",
+    "sendDate": "Send date",
+    "sendTime": "Send time",
+    "scheduledFor": "Scheduled for {{time}}",
+    "sendNow": "Send now",
+    "changeTime": "Change time",
+    "cancelSchedule": "Cancel schedule",
+    "scheduleReview": "Review mentions and placeholders before scheduling this reply."
   },
   "sharedDraft": {
     "label": "Shared draft",

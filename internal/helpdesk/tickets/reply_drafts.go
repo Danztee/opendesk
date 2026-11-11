@@ -159,7 +159,7 @@ func registerReplyDrafts(d *deps.Deps, api huma.API) {
 					return httpx.E(http.StatusConflict, "reply_scheduled", "This reply is scheduled. Cancel the schedule to change it.")
 				}
 				if empty {
-					_, err := tx.Exec(ctx, `DELETE FROM ticket_reply_drafts WHERE workspace_id = $1 AND ticket_id = $2 AND user_id = $3`,
+					_, err := tx.Exec(ctx, `DELETE FROM ticket_reply_drafts WHERE workspace_id = $1 AND ticket_id = $2 AND user_id = $3 AND send_at IS NULL`,
 						p.WorkspaceID, tid, p.UserID)
 					return err
 				}
@@ -169,7 +169,7 @@ func registerReplyDrafts(d *deps.Deps, api huma.API) {
 				if _, err := tx.Exec(ctx, `INSERT INTO ticket_reply_drafts (ticket_id, user_id, workspace_id, body_html, body_text, attachment_ids)
 					VALUES ($1, $2, $3, $4, $5, $6)
 					ON CONFLICT (ticket_id, user_id) DO UPDATE SET body_html = EXCLUDED.body_html, body_text = EXCLUDED.body_text,
-						attachment_ids = EXCLUDED.attachment_ids, updated_at = now()`,
+						attachment_ids = EXCLUDED.attachment_ids, updated_at = now() WHERE ticket_reply_drafts.send_at IS NULL`,
 					tid, p.UserID, p.WorkspaceID, html, text, attIDs); err != nil {
 					return err
 				}

@@ -98,6 +98,7 @@ func registerScheduledReplies(d *deps.Deps, api huma.API) {
 			if err != nil {
 				return nil, err
 			}
+			in.Body.SendAt = in.Body.SendAt.Truncate(time.Microsecond)
 			now := time.Now()
 			if in.Body.SendAt.Before(now.Add(scheduleMin)) || in.Body.SendAt.After(now.Add(scheduleMax)) {
 				return nil, httpx.Validation("send_at must be between a minute and a year from now")
@@ -198,8 +199,10 @@ func registerScheduledReplies(d *deps.Deps, api huma.API) {
 				if reply == nil {
 					return httpx.NotFound("Scheduled reply")
 				}
-				msg, err = PostMessage(ctx, tx, d, p, tid, *reply)
-				return err
+				if msg, err = PostMessage(ctx, tx, d, p, tid, *reply); err != nil {
+					return err
+				}
+				return dropScheduled(ctx, tx, p.WorkspaceID, tid, p.UserID)
 			})
 			if err != nil {
 				return nil, httpx.Wrap(err)
@@ -258,6 +261,13 @@ func loadScheduled(ctx context.Context, q db.Querier, wid, tid, uid uuid.UUID) (
 	return &in, at, nil
 }
 
+// dropScheduled removes a scheduled reply draft once it went out (sending another reply
+// leaves a scheduled one alone, domain.AddMessage).
+func dropScheduled(ctx context.Context, tx pgx.Tx, wid, tid, uid uuid.UUID) error {
+	_, err := tx.Exec(ctx, `DELETE FROM ticket_reply_drafts WHERE workspace_id = $1 AND ticket_id = $2 AND user_id = $3`, wid, tid, uid)
+	return err
+}
+
 // dryRun checks a reply as sending it would, inside a savepoint it then rolls back.
 func dryRun(ctx context.Context, tx pgx.Tx, d *deps.Deps, p *auth.Principal, tid uuid.UUID, reply MessageInput) error {
 	if _, err := tx.Exec(ctx, `SAVEPOINT schedule_check`); err != nil {
@@ -310,7 +320,7 @@ func SendScheduledReply(ctx context.Context, d *deps.Deps, a jobs.ScheduledReply
 			_, err = PostMessage(ctx, tx, d, p, a.TicketID, *reply)
 		}
 		if err == nil {
-			return nil
+			return dropScheduled(ctx, tx, a.WorkspaceID, a.TicketID, a.UserID)
 		}
 		if _, rerr := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT scheduled_send`); rerr != nil {
 			return rerr

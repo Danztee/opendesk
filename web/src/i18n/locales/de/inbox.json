@@ -631,7 +631,17 @@
     "chatReply": "Im Chat · per E-Mail, falls der Besucher gegangen ist",
     "chatReplyHint": "Ihre Antwort erscheint sofort im Chat des Besuchers. Hat er die Seite verlassen (2 Minuten ohne Aktivität), geht sie eine Minute später zusätzlich an seine E-Mail-Adresse, außer er kommt zurück.",
     "chatReplyHere": "Im Chat",
-    "chatReplyAway": "Im Chat · per E-Mail, falls er sie nicht liest"
+    "chatReplyAway": "Im Chat · per E-Mail, falls er sie nicht liest",
+    "sendLater": "Später senden",
+    "scheduleHint": "Wähle einen Zeitpunkt zwischen einer Minute und einem Jahr ab jetzt ({{zone}}).",
+    "scheduleReply": "Antwort planen",
+    "sendDate": "Sendedatum",
+    "sendTime": "Sendezeit",
+    "scheduledFor": "Geplant für {{time}}",
+    "sendNow": "Jetzt senden",
+    "changeTime": "Zeit ändern",
+    "cancelSchedule": "Planung abbrechen",
+    "scheduleReview": "Prüfe Erwähnungen und Platzhalter, bevor du diese Antwort planst."
   },
   "sharedDraft": {
     "label": "Geteilter Entwurf",

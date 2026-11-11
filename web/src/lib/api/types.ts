@@ -2570,6 +2570,8 @@ export type ReplyDraft = {
   body_html: string;
   attachments: Attachment[];
   updated_at: string;
+  schedule?: { send_at: string; cc: string[]; bcc: string[]; status: TicketStatus | null; mailbox_id: string } | null;
+  send_error?: string;
 };
 
 /** Ollie's suggested reply on an email ticket (contracts/agent.md "Email"). */

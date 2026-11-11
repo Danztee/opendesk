@@ -840,7 +840,9 @@ sends no event. The app saves it a moment after typing stops and fills an empty 
 when the ticket opens; a reply box that already has text keeps it and replaces the saved one.
 
 ```ts
-type ReplyDraft = { ticket_id: string; body_html: string; attachments: Attachment[]; updated_at: string };
+type ReplyDraft = { ticket_id: string; body_html: string; attachments: Attachment[]; updated_at: string;
+  schedule: { send_at: string; cc: string[]; bcc: string[]; status: string | null; mailbox_id: string } | null;
+  send_error: string };
 ```
 
 - One per member and ticket. The member's reply going out on the ticket (`POST /v1/tickets/{id}/messages`,
@@ -849,6 +851,22 @@ type ReplyDraft = { ticket_id: string; body_html: string; attachments: Attachmen
 - `attachments` are uploads (`POST /v1/attachments`) not yet on a message. The purge of stale uploads
   (24 hours) leaves the ones a draft holds, and a draft untouched for 30 days is deleted, which frees them.
 - It is not the ticket's shared draft above, which a teammate or an AI agent stages for whoever opens the ticket.
+
+A member can schedule a reply with `POST /v1/tickets/{id}/reply-draft/schedule`,
+`{send_at, reply}`. `reply` is the message send body (`kind: "reply"`); replies written from
+notes cannot be scheduled. `send_at` is an RFC 3339 timestamp between one minute and 365 days
+from now. The response is `{draft}`. Leaving `reply` out moves an existing scheduled reply.
+`DELETE /v1/tickets/{id}/reply-draft/schedule` cancels sending and returns `{draft}`, keeping
+its words and files. `POST /v1/tickets/{id}/reply-draft/send` sends immediately and returns
+the message (201). These routes require a signed-in agent with `tickets:write`.
+
+Scheduling validates the reply as sending would. A River job sends it as the member at the
+chosen time, checking their current role, workspace, ticket visibility and sender permissions.
+The message timestamp is the actual send time. Jobs from a cancelled or moved schedule do
+nothing. Transient failures retry up to three attempts; a refused or exhausted send keeps the
+draft with `send_error`. Scheduled drafts are exempt from the 30-day draft purge. Sending
+another reply preserves a scheduled draft. Autosave refuses edits while scheduled (409);
+cancel first to edit. The app shows the scheduled time in the device timezone.
 
 #### Labels and custom fields
 
