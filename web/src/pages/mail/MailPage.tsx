@@ -65,7 +65,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { AccountDot, boxIcon, FolderGlyph } from "@/components/collab/bits";
 import { canOfferCategories, CategoryOffer, CategoryTabs, useCategorySettingsTarget } from "@/components/collab/CategoryTabs";
 import { FolderBar } from "@/components/collab/FolderBar";
-import { SearchCoverage, StorageFullBanner } from "@/components/collab/MailNotices";
+import { SearchCoverage, SpamBesideWork, StorageFullBanner } from "@/components/collab/MailNotices";
 import { AssignPicker, LabelsPicker, MovePicker, type MoveTarget } from "@/components/collab/pickers";
 import { ListShareDialog, SnoozeItems } from "@/components/collab/ThreadMenu";
 import { ThreadRow, type AIDraftAction } from "@/components/collab/ThreadRow";
@@ -891,6 +891,7 @@ export default function MailPage() {
         {tabs.length > 0 && category && <CategoryTabs tabs={tabs} active={category} search={search} settings={settingsTarget} />}
         {offer && <CategoryOffer account={offer} />}
         {!noAccounts && <StorageFullBanner />}
+        {(box === "needs_action" || box === "ai_review") && accounts && <SpamBesideWork accounts={account ? [account] : accounts} counts={counts} />}
         {search.q && !noAccounts && <SearchCoverage accounts={scopeAccount ? [scopeAccount] : (accounts ?? [])} />}
         {(addresses.length > 1 || search.to) && (
           <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line-soft px-4 text-[11.5px] text-fg-3">
