@@ -13,7 +13,7 @@ import (
 	"github.com/useopendesk/opendesk/internal/ids"
 )
 
-type importUpload struct {
+type contactImportUpload struct {
 	UploadID  uuid.UUID `json:"upload_id"`
 	Rows      int       `json:"rows"`
 	Suggested struct {
@@ -40,7 +40,7 @@ type importState struct {
 
 func runImport(t *testing.T, e *hdtest.Env, ws hdtest.WS, a hdtest.Auth, file, onMatch string, mapping map[string]any) importState {
 	t.Helper()
-	var up importUpload
+	var up contactImportUpload
 	e.Upload("/v1/contacts/import/upload", a, "people.csv", []byte(file)).Want(t, 201).JSON(t, &up)
 	var x importState
 	e.Do("POST", "/v1/contacts/imports", a, map[string]any{"upload_id": up.UploadID, "mapping": mapping, "match_on": "email", "on_match": onMatch}).Want(t, 201).JSON(t, &x)
@@ -65,7 +65,7 @@ func TestContactImport(t *testing.T) {
 	mapping := map[string]any{"name": "Full name", "email": "E-mail", "phone": "Phone", "company": "Company", "labels": "Labels"}
 
 	// The headers are matched to fields without being told.
-	var up importUpload
+	var up contactImportUpload
 	e.Upload("/v1/contacts/import/upload", a, "people.csv", []byte(file)).Want(t, 201).JSON(t, &up)
 	if up.Rows != 4 || up.Suggested.Email != "E-mail" || up.Suggested.Name != "Full name" || up.Suggested.Phone != "Phone" {
 		t.Fatalf("upload %+v", up)
@@ -119,7 +119,7 @@ func TestContactImportRefusals(t *testing.T) {
 	e := hdtest.New(t, contacts.Register)
 	ws := e.NewWorkspace()
 	a := ws.Agent.As(ws)
-	var up importUpload
+	var up contactImportUpload
 	e.Upload("/v1/contacts/import/upload", a, "people.csv", []byte("Name,Email\nA,a@example.com\n")).Want(t, 201).JSON(t, &up)
 	start := func(mapping map[string]any, matchOn string) *hdtest.Resp {
 		return e.Do("POST", "/v1/contacts/imports", a, map[string]any{"upload_id": up.UploadID, "mapping": mapping, "match_on": matchOn, "on_match": "skip"})

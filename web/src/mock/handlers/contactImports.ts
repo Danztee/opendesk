@@ -25,7 +25,7 @@ const CHUNK = 20;
 const TICK = 350;
 
 function parseCsv(text: string): string[][] {
-  const t = text.replace(/^﻿/, "");
+  const t = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const first = t.split(/\r?\n/, 1)[0] ?? "";
   const sep = [",", ";", "\t"].sort((a, b) => first.split(b).length - first.split(a).length)[0]!;
   const rows: string[][] = [];
@@ -35,11 +35,16 @@ function parseCsv(text: string): string[][] {
   for (let i = 0; i < t.length; i++) {
     const c = t[i]!;
     if (quoted) {
-      if (c === '"' && t[i + 1] === '"') (cell += '"'), i++;
-      else if (c === '"') quoted = false;
+      if (c === '"' && t[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (c === '"') quoted = false;
       else cell += c;
     } else if (c === '"') quoted = true;
-    else if (c === sep) (row.push(cell), (cell = ""));
+    else if (c === sep) {
+      row.push(cell);
+      cell = "";
+    }
     else if (c === "\n" || c === "\r") {
       if (c === "\r" && t[i + 1] === "\n") i++;
       row.push(cell);
