@@ -16,6 +16,7 @@ import (
 	"github.com/useopendesk/opendesk/internal/db"
 	"github.com/useopendesk/opendesk/internal/deps"
 	"github.com/useopendesk/opendesk/internal/domain"
+	"github.com/useopendesk/opendesk/internal/events"
 	"github.com/useopendesk/opendesk/internal/helpdesk/hd"
 	"github.com/useopendesk/opendesk/internal/httpx"
 	"github.com/useopendesk/opendesk/internal/jobs"
@@ -26,7 +27,8 @@ import (
 // status) with the draft, checks it as a send would, and a job sends it at send_at as that
 // member, through PostMessage, so the message is stamped when it actually goes out. Until
 // then the member can send it now, schedule it for another time or cancel, which keeps it
-// as a draft. A scheduled send that is no longer allowed keeps the draft with the reason.
+// as a draft. A scheduled send that is no longer allowed keeps the draft with the reason, a
+// SendError code, and tells the member (a scheduled_reply_failed notification).
 
 const (
 	// scheduleMin and scheduleMax bound how far ahead a reply can be scheduled.
@@ -35,6 +37,20 @@ const (
 	// scheduledReplyAttempts bounds retries of a send that failed for a passing reason.
 	scheduledReplyAttempts = 3
 )
+
+// Why a scheduled reply did not go out (ReplyDraft.send_error); the app words each one.
+const (
+	SendErrorMerged         = "merged"           // the ticket was merged into another
+	SendErrorNotVisible     = "not_visible"      // the ticket is gone or hidden from the member
+	SendErrorCannotSendFrom = "cannot_send_from" // the member may no longer send from its address
+	SendErrorMemberGone     = "member_gone"      // the member left, was suspended or may no longer reply
+	SendErrorRefused        = "refused"          // the reply was refused as sending it now would be
+	SendErrorFailed         = "failed"           // every try failed
+)
+
+// errTicketMerged refuses sending or scheduling a reply on a ticket merged into another.
+var errTicketMerged = httpx.E(http.StatusConflict, "ticket_merged",
+	"This ticket was merged into another. Reply on that ticket instead.")
 
 // ScheduledSend is when and how a scheduled reply draft goes out.
 type ScheduledSend struct {
@@ -109,6 +125,9 @@ func registerScheduledReplies(d *deps.Deps, api huma.API) {
 				if err != nil {
 					return err
 				}
+				if err := notMerged(ctx, tx, p.WorkspaceID, tid); err != nil {
+					return err
+				}
 				reply, err := scheduledReply(ctx, tx, p, tid, in.Body.Reply)
 				if err != nil {
 					return err
@@ -140,8 +159,10 @@ func registerScheduledReplies(d *deps.Deps, api huma.API) {
 					SendAt: in.Body.SendAt.UTC()}, &river.InsertOpts{ScheduledAt: in.Body.SendAt, MaxAttempts: scheduledReplyAttempts}); err != nil {
 					return err
 				}
-				out.Body.Draft, err = loadReplyDraft(ctx, tx, p.WorkspaceID, tid, p.UserID)
-				return err
+				if out.Body.Draft, err = loadReplyDraft(ctx, tx, p.WorkspaceID, tid, p.UserID); err != nil {
+					return err
+				}
+				return publishReplyDraft(ctx, tx, p.WorkspaceID, tid, p.UserID, out.Body.Draft)
 			})
 			if err != nil {
 				return nil, httpx.Wrap(err)
@@ -168,8 +189,10 @@ func registerScheduledReplies(d *deps.Deps, api huma.API) {
 					WHERE workspace_id = $1 AND ticket_id = $2 AND user_id = $3`, p.WorkspaceID, tid, p.UserID); err != nil {
 					return err
 				}
-				out.Body.Draft, err = loadReplyDraft(ctx, tx, p.WorkspaceID, tid, p.UserID)
-				return err
+				if out.Body.Draft, err = loadReplyDraft(ctx, tx, p.WorkspaceID, tid, p.UserID); err != nil {
+					return err
+				}
+				return publishReplyDraft(ctx, tx, p.WorkspaceID, tid, p.UserID, out.Body.Draft)
 			})
 			if err != nil {
 				return nil, httpx.Wrap(err)
@@ -199,10 +222,16 @@ func registerScheduledReplies(d *deps.Deps, api huma.API) {
 				if reply == nil {
 					return httpx.NotFound("Scheduled reply")
 				}
+				if err := notMerged(ctx, tx, p.WorkspaceID, tid); err != nil {
+					return err
+				}
 				if msg, err = PostMessage(ctx, tx, d, p, tid, *reply); err != nil {
 					return err
 				}
-				return dropScheduled(ctx, tx, p.WorkspaceID, tid, p.UserID)
+				if err := dropScheduled(ctx, tx, p.WorkspaceID, tid, p.UserID); err != nil {
+					return err
+				}
+				return publishReplyDraft(ctx, tx, p.WorkspaceID, tid, p.UserID, nil)
 			})
 			if err != nil {
 				return nil, httpx.Wrap(err)
@@ -261,6 +290,73 @@ func loadScheduled(ctx context.Context, q db.Querier, wid, tid, uid uuid.UUID) (
 	return &in, at, nil
 }
 
+// notMerged refuses a ticket merged into another: its conversation lives there now, and a
+// reply on it would go out from a closed ticket.
+func notMerged(ctx context.Context, q db.Querier, wid, tid uuid.UUID) error {
+	var into *uuid.UUID
+	if err := q.QueryRow(ctx, `SELECT merged_into_id FROM tickets WHERE workspace_id = $1 AND id = $2`, wid, tid).Scan(&into); err != nil {
+		return err
+	}
+	if into != nil {
+		return errTicketMerged
+	}
+	return nil
+}
+
+// publishReplyDraft tells the member's own apps that their reply draft on the ticket changed
+// (reply_draft.updated, to them alone): a scheduled reply was scheduled, moved, cancelled,
+// sent or kept. draft is the draft as it is now, nil once it is gone.
+func publishReplyDraft(ctx context.Context, tx pgx.Tx, wid, tid, uid uuid.UUID, draft *ReplyDraft) error {
+	_, err := events.Publish(ctx, tx, events.Event{WorkspaceID: wid, Type: "reply_draft.updated", Users: []uuid.UUID{uid},
+		Data: map[string]any{"ticket_id": tid, "draft": draft}})
+	return err
+}
+
+// keepScheduled keeps a member's scheduled reply as their draft with why it did not go out
+// (a SendError code), tells them with a scheduled_reply_failed notification unless notify is
+// false (they caused it themselves) and updates their reply box. A ticket they may no longer
+// see is not named in the notification.
+func keepScheduled(ctx context.Context, tx pgx.Tx, wid, tid, uid uuid.UUID, code string, notify bool) error {
+	if _, err := tx.Exec(ctx, `UPDATE ticket_reply_drafts SET send_at = NULL, send_error = $4, updated_at = now()
+		WHERE workspace_id = $1 AND ticket_id = $2 AND user_id = $3`, wid, tid, uid, code); err != nil {
+		return err
+	}
+	if notify {
+		ticket := &tid
+		if code == SendErrorNotVisible {
+			ticket = nil
+		}
+		if err := hd.Notify(ctx, tx, wid, uid, hd.NotifyScheduledReplyFailed, ticket, map[string]any{"reason": code}); err != nil {
+			return err
+		}
+	}
+	draft, err := loadReplyDraft(ctx, tx, wid, tid, uid)
+	if err != nil {
+		return err
+	}
+	return publishReplyDraft(ctx, tx, wid, tid, uid, draft)
+}
+
+// keepScheduledOn keeps every reply scheduled on a ticket as its author's draft, with code;
+// by, the member whose change stopped them, is not notified about their own.
+func keepScheduledOn(ctx context.Context, tx pgx.Tx, wid, tid uuid.UUID, code string, by *uuid.UUID) error {
+	rows, err := tx.Query(ctx, `SELECT user_id FROM ticket_reply_drafts WHERE workspace_id = $1 AND ticket_id = $2 AND send_at IS NOT NULL
+		ORDER BY user_id FOR UPDATE`, wid, tid)
+	if err != nil {
+		return err
+	}
+	authors, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return err
+	}
+	for _, uid := range authors {
+		if err := keepScheduled(ctx, tx, wid, tid, uid, code, by == nil || *by != uid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // dropScheduled removes a scheduled reply draft once it went out (sending another reply
 // leaves a scheduled one alone, domain.AddMessage).
 func dropScheduled(ctx context.Context, tx pgx.Tx, wid, tid, uid uuid.UUID) error {
@@ -291,9 +387,10 @@ func (w *ScheduledReplyWorker) Work(ctx context.Context, job *river.Job[jobs.Sch
 }
 
 // SendScheduledReply sends the member's scheduled reply if it is still scheduled for a.SendAt.
-// A reply that may not go out any more (the member left or lost the role, the ticket is gone
-// or hidden from them, the address is no longer theirs) is kept as their draft with the
-// reason; a passing failure is retried, and the last try keeps the draft too.
+// A reply that may not go out any more (the member left or lost the role, the ticket is gone,
+// hidden from them or merged into another, the address is no longer theirs) is kept as their
+// draft with the reason (keepScheduled); a passing failure is retried, and the last try keeps
+// the draft too.
 func SendScheduledReply(ctx context.Context, d *deps.Deps, a jobs.ScheduledReplyArgs, last bool) error {
 	var retry error
 	err := d.DB.Tx(ctx, func(tx pgx.Tx) error {
@@ -301,39 +398,35 @@ func SendScheduledReply(ctx context.Context, d *deps.Deps, a jobs.ScheduledReply
 		if err != nil || reply == nil || !at.Equal(a.SendAt) {
 			return err // sent, cancelled or moved since
 		}
-		keep := func(reason string) error {
-			_, err := tx.Exec(ctx, `UPDATE ticket_reply_drafts SET send_at = NULL, send_error = $4, updated_at = now()
-				WHERE workspace_id = $1 AND ticket_id = $2 AND user_id = $3`, a.WorkspaceID, a.TicketID, a.UserID, reason)
-			return err
+		keep := func(code string) error {
+			return keepScheduled(ctx, tx, a.WorkspaceID, a.TicketID, a.UserID, code, true)
 		}
 		p, err := scheduledPrincipal(ctx, tx, a.WorkspaceID, a.UserID)
 		if err != nil {
 			return err
 		}
 		if p == nil {
-			return keep("You can no longer reply on this ticket, so the reply was not sent.")
+			return keep(SendErrorMemberGone)
 		}
 		if _, err := tx.Exec(ctx, `SAVEPOINT scheduled_send`); err != nil {
 			return err
 		}
-		if _, err = domain.ResolveVisibleTicket(ctx, tx, p, a.TicketID.String()); err == nil {
-			_, err = PostMessage(ctx, tx, d, p, a.TicketID, *reply)
-		}
+		code, err := sendScheduled(ctx, tx, d, p, a.TicketID, *reply)
 		if err == nil {
-			return dropScheduled(ctx, tx, a.WorkspaceID, a.TicketID, a.UserID)
+			if err := dropScheduled(ctx, tx, a.WorkspaceID, a.TicketID, a.UserID); err != nil {
+				return err
+			}
+			return publishReplyDraft(ctx, tx, a.WorkspaceID, a.TicketID, a.UserID, nil)
 		}
 		if _, rerr := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT scheduled_send`); rerr != nil {
 			return rerr
 		}
-		var he *httpx.Error
 		switch {
-		case errors.As(err, &he):
-			return keep("The scheduled reply was not sent: " + he.Detail)
-		case db.IsNotFound(err):
-			return keep("The ticket is gone, so the reply was not sent.")
+		case code != "":
+			return keep(code)
 		case last:
 			d.Log.Error("scheduled reply", "err", err, "ticket_id", a.TicketID)
-			return keep("The scheduled reply could not be sent. Send it again.")
+			return keep(SendErrorFailed)
 		}
 		retry = err
 		return nil
@@ -342,6 +435,37 @@ func SendScheduledReply(ctx context.Context, d *deps.Deps, a jobs.ScheduledReply
 		return err
 	}
 	return retry
+}
+
+// sendScheduled sends a member's scheduled reply when it is due, on a ticket they still see and
+// that was not merged into another since. A send that may not go out returns the SendError code
+// it is kept with; an error without one may pass, and is retried.
+func sendScheduled(ctx context.Context, tx pgx.Tx, d *deps.Deps, p *auth.Principal, tid uuid.UUID, reply MessageInput) (string, error) {
+	var he *httpx.Error
+	if _, err := domain.ResolveVisibleTicket(ctx, tx, p, tid.String()); err != nil {
+		if errors.As(err, &he) || db.IsNotFound(err) {
+			return SendErrorNotVisible, err
+		}
+		return "", err
+	}
+	if err := notMerged(ctx, tx, p.WorkspaceID, tid); err != nil {
+		if errors.Is(err, errTicketMerged) {
+			return SendErrorMerged, err
+		}
+		return "", err
+	}
+	_, err := PostMessage(ctx, tx, d, p, tid, reply)
+	switch {
+	case err == nil:
+		return "", nil
+	case errors.Is(err, auth.ErrForbidden), errors.As(err, &he) && he.Status == http.StatusForbidden:
+		return SendErrorCannotSendFrom, err
+	case errors.As(err, &he):
+		return SendErrorRefused, err
+	case db.IsNotFound(err):
+		return SendErrorNotVisible, err
+	}
+	return "", err
 }
 
 // scheduledPrincipal is the member who scheduled a reply, as they would be signed in now, or

@@ -647,7 +647,16 @@
     "sendNow": "Send now",
     "changeTime": "Change time",
     "cancelSchedule": "Cancel schedule",
-    "scheduleReview": "Review mentions and placeholders before scheduling this reply."
+    "scheduleReview": "Review mentions and placeholders before scheduling this reply.",
+    "scheduleFailed": "The scheduled reply was not sent.",
+    "scheduleError": {
+      "merged": "The ticket was merged into another, so the reply was not sent.",
+      "not_visible": "The ticket is gone or you can no longer see it, so the reply was not sent.",
+      "cannot_send_from": "You can no longer send from this address, so the reply was not sent. Pick another address and send it again.",
+      "member_gone": "You can no longer reply on this ticket, so the reply was not sent.",
+      "refused": "The reply could no longer be sent as it was written when it was due. Check it and send it again.",
+      "failed": "The scheduled reply could not be sent. Send it again."
+    }
   },
   "sharedDraft": {
     "label": "Shared draft",
