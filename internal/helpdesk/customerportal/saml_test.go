@@ -71,6 +71,7 @@ type samlOpts struct {
 	sign                string   // "assertion" (default), "response" or "none"
 	tamper              func(xml string) string
 	status              string
+	noAudience          bool
 }
 
 func (p *samlIDP) response(t *testing.T, ws hdtest.WS, requestID string, o samlOpts) string {
@@ -91,6 +92,10 @@ func (p *samlIDP) response(t *testing.T, ws hdtest.WS, requestID string, o samlO
 		na = now.Add(o.notAfter).Format(time.RFC3339)
 	}
 	aid := or(o.assertionID, fmt.Sprintf("_a%d", time.Now().UnixNano()))
+	audience := `<saml:AudienceRestriction><saml:Audience>` + or(o.audience, sp) + `</saml:Audience></saml:AudienceRestriction>`
+	if o.noAudience {
+		audience = ""
+	}
 	attrs := ""
 	if o.email != "" {
 		attrs += `<saml:Attribute Name="email"><saml:AttributeValue>` + o.email + `</saml:AttributeValue></saml:Attribute>`
@@ -104,12 +109,12 @@ func (p *samlIDP) response(t *testing.T, ws hdtest.WS, requestID string, o samlO
 		`<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="%s" Version="2.0" IssueInstant="%s"><saml:Issuer>%s</saml:Issuer>`+
 		`<saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent">%s</saml:NameID>`+
 		`<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData NotOnOrAfter="%s" Recipient="%s" InResponseTo="%s"/></saml:SubjectConfirmation></saml:Subject>`+
-		`<saml:Conditions NotBefore="%s" NotOnOrAfter="%s"><saml:AudienceRestriction><saml:Audience>%s</saml:Audience></saml:AudienceRestriction></saml:Conditions>`+
+		`<saml:Conditions NotBefore="%s" NotOnOrAfter="%s">%s</saml:Conditions>`+
 		`<saml:AuthnStatement AuthnInstant="%s"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement>`+
 		`<saml:AttributeStatement>%s</saml:AttributeStatement></saml:Assertion></samlp:Response>`,
 		time.Now().UnixNano(), now.Format(time.RFC3339), acs, irt, or(o.issuer, samlEntity), status,
 		aid, now.Format(time.RFC3339), or(o.issuer, samlEntity), or(o.nameID, "name-id-1"), na, or(o.recipient, acs), irt,
-		nb, na, or(o.audience, sp), now.Format(time.RFC3339), attrs)
+		nb, na, audience, now.Format(time.RFC3339), attrs)
 
 	d := etree.NewDocument()
 	if err := d.ReadFromString(doc); err != nil {
@@ -262,6 +267,7 @@ func TestSAMLRefusals(t *testing.T) {
 	refused("another provider's key", samlOpts{signer: other}, "provider_error", nil)
 	refused("another issuer", samlOpts{issuer: "https://evil.example.test/entity"}, "provider_error", nil)
 	refused("another audience", samlOpts{audience: "https://other-sp.example.test"}, "provider_error", nil)
+	refused("no audience at all", samlOpts{noAudience: true}, "provider_error", nil)
 	refused("expired", samlOpts{notAfter: -2 * time.Minute, notBefore: -10 * time.Minute}, "provider_error", nil)
 	refused("not yet valid", samlOpts{notBefore: 10 * time.Minute}, "provider_error", nil)
 	refused("another request's answer", samlOpts{inResponseTo: "_someone-elses-request"}, "provider_error", nil)

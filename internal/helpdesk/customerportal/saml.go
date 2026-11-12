@@ -240,6 +240,11 @@ func (s *service) samlIdentity(ctx context.Context, hc kb.HelpCenter, b ssoBrand
 		sub.SubjectConfirmation.SubjectConfirmationData.InResponseTo != rid || a.ID == "" || a.Conditions == nil {
 		return out, "provider_error"
 	}
+	// The library judges the restrictions an assertion has; one with none is meant for anyone,
+	// so a captured assertion could be offered to any service provider that trusts the provider.
+	if len(a.Conditions.AudienceRestrictions) == 0 {
+		return out, "provider_error"
+	}
 	if info.NameID == "" || len(info.NameID) > 500 {
 		return out, "provider_error"
 	}
