@@ -29,7 +29,7 @@ describe("mock contact export", () => {
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toContain("text/csv");
     expect(r.headers.get("content-disposition")).toContain("attachment");
-    const lines = (r.body as string).replace(/^﻿/, "").trim().split("\r\n");
+    const lines = (r.body as string).replace(String.fromCharCode(0xfeff), "").trim().split("\r\n");
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^Name,Email,/);
     expect(lines[1]).toContain("'=SUM(1+1)");

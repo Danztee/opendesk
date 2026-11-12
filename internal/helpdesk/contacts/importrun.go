@@ -54,13 +54,13 @@ type importRun struct {
 	ImportID              uuid.UUID
 	WorkspaceID           uuid.UUID
 	UploadID              uuid.UUID
-	Mapping               ImportMapping
+	Mapping               ContactImportMapping
 	MatchOn, OnMatch      string
 	CreatedBy             *uuid.UUID
 	Processed             int
 	Created, Updated      int
 	Skipped, Failed       int
-	Errors                []ImportRowError
+	Errors                []ContactImportRowError
 	status, key, filename string
 }
 
@@ -76,7 +76,7 @@ func loadRun(ctx context.Context, d *deps.Deps, id uuid.UUID) (*importRun, error
 		return nil, err
 	}
 	_ = json.Unmarshal(mapping, &r.Mapping)
-	r.Errors = []ImportRowError{}
+	r.Errors = []ContactImportRowError{}
 	_ = json.Unmarshal(errs, &r.Errors)
 	return r, nil
 }
@@ -196,11 +196,11 @@ func columnIndex(header []string) map[string]int {
 // that cannot be saved fails alone, and moves the checkpoint with them.
 func (r *importRun) chunk(ctx context.Context, d *deps.Deps, f *imports.CSVFile, cols map[string]int, defs domain.FieldDefs, from, to int) error {
 	next := *r
-	next.Errors = append([]ImportRowError{}, r.Errors...)
+	next.Errors = append([]ContactImportRowError{}, r.Errors...)
 	var x ContactImport
 	err := d.DB.Tx(ctx, func(tx pgx.Tx) error {
 		next = *r
-		next.Errors = append([]ImportRowError{}, r.Errors...)
+		next.Errors = append([]ContactImportRowError{}, r.Errors...)
 		p := r.principal()
 		for i := from; i < to; i++ {
 			sp, err := tx.Begin(ctx)
@@ -215,7 +215,7 @@ func (r *importRun) chunk(ctx context.Context, d *deps.Deps, f *imports.CSVFile,
 				}
 				next.Failed++
 				if len(next.Errors) < maxRowErrors {
-					next.Errors = append(next.Errors, ImportRowError{Line: f.Lines[i], Message: rowMessage(err)})
+					next.Errors = append(next.Errors, ContactImportRowError{Line: f.Lines[i], Message: rowMessage(err)})
 				}
 				continue
 			}

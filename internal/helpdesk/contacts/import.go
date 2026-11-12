@@ -54,8 +54,8 @@ const (
 // maxRowErrors bounds the failed rows an import keeps to show; the count is exact.
 const maxRowErrors = 50
 
-// ImportMapping names the CSV column that fills each contact field ("" leaves it unset).
-type ImportMapping struct {
+// ContactImportMapping names the CSV column that fills each contact field ("" leaves it unset).
+type ContactImportMapping struct {
 	Name       string `json:"name,omitempty" maxLength:"200"`
 	Email      string `json:"email,omitempty" maxLength:"200"`
 	Phone      string `json:"phone,omitempty" maxLength:"200"`
@@ -67,7 +67,7 @@ type ImportMapping struct {
 	Fields map[string]string `json:"fields,omitempty" maxProperties:"50"`
 }
 
-func (m ImportMapping) columns() []string {
+func (m ContactImportMapping) columns() []string {
 	out := []string{m.Name, m.Email, m.Phone, m.Company, m.ExternalID, m.Notes, m.Labels}
 	for _, c := range m.Fields {
 		out = append(out, c)
@@ -75,41 +75,41 @@ func (m ImportMapping) columns() []string {
 	return out
 }
 
-type ImportColumn struct {
+type ContactImportColumn struct {
 	Name    string   `json:"name"`
 	Samples []string `json:"samples"`
 }
 
-type ImportUpload struct {
-	UploadID  uuid.UUID      `json:"upload_id"`
-	Filename  string         `json:"filename"`
-	Rows      int            `json:"rows"`
-	Columns   []ImportColumn `json:"columns"`
-	Suggested ImportMapping  `json:"suggested"`
+type ContactImportUpload struct {
+	UploadID  uuid.UUID             `json:"upload_id"`
+	Filename  string                `json:"filename"`
+	Rows      int                   `json:"rows"`
+	Columns   []ContactImportColumn `json:"columns"`
+	Suggested ContactImportMapping  `json:"suggested"`
 }
 
-type ImportRowError struct {
+type ContactImportRowError struct {
 	Line    int    `json:"line"`
 	Message string `json:"message"`
 }
 
 // ContactImport is one run of a file into the directory.
 type ContactImport struct {
-	ID         uuid.UUID        `json:"id"`
-	Filename   string           `json:"filename"`
-	Status     string           `json:"status" enum:"running,done,failed,cancelled"`
-	MatchOn    string           `json:"match_on" enum:"email,external_id"`
-	OnMatch    string           `json:"on_match" enum:"skip,fill,overwrite"`
-	Total      int              `json:"total"`
-	Processed  int              `json:"processed"`
-	Created    int              `json:"created"`
-	Updated    int              `json:"updated"`
-	Skipped    int              `json:"skipped"`
-	Failed     int              `json:"failed"`
-	Errors     []ImportRowError `json:"errors" doc:"The first rows that could not be imported, with the line each is on"`
-	Error      string           `json:"error" doc:"Why the import stopped, when it failed"`
-	CreatedAt  time.Time        `json:"created_at"`
-	FinishedAt *time.Time       `json:"finished_at"`
+	ID         uuid.UUID               `json:"id"`
+	Filename   string                  `json:"filename"`
+	Status     string                  `json:"status" enum:"running,done,failed,cancelled"`
+	MatchOn    string                  `json:"match_on" enum:"email,external_id"`
+	OnMatch    string                  `json:"on_match" enum:"skip,fill,overwrite"`
+	Total      int                     `json:"total"`
+	Processed  int                     `json:"processed"`
+	Created    int                     `json:"created"`
+	Updated    int                     `json:"updated"`
+	Skipped    int                     `json:"skipped"`
+	Failed     int                     `json:"failed"`
+	Errors     []ContactImportRowError `json:"errors" doc:"The first rows that could not be imported, with the line each is on"`
+	Error      string                  `json:"error" doc:"Why the import stopped, when it failed"`
+	CreatedAt  time.Time               `json:"created_at"`
+	FinishedAt *time.Time              `json:"finished_at"`
 }
 
 const importCols = `id, filename, status, match_on, on_match, total, processed, created, updated, skipped, failed, errors, error, created_at, finished_at`
@@ -121,19 +121,19 @@ func scanImport(r pgx.Row) (ContactImport, error) {
 		&x.Skipped, &x.Failed, &errs, &x.Error, &x.CreatedAt, &x.FinishedAt); err != nil {
 		return x, err
 	}
-	x.Errors = []ImportRowError{}
+	x.Errors = []ContactImportRowError{}
 	_ = json.Unmarshal(errs, &x.Errors)
 	return x, nil
 }
 
-type importStartBody struct {
-	UploadID uuid.UUID     `json:"upload_id"`
-	Mapping  ImportMapping `json:"mapping"`
-	MatchOn  string        `json:"match_on" enum:"email,external_id" doc:"What tells that a person is already in the directory"`
-	OnMatch  string        `json:"on_match" enum:"skip,fill,overwrite" doc:"skip leaves them alone, fill sets only what they have empty, overwrite sets every mapped value the file has"`
+type contactImportStartBody struct {
+	UploadID uuid.UUID            `json:"upload_id"`
+	Mapping  ContactImportMapping `json:"mapping"`
+	MatchOn  string               `json:"match_on" enum:"email,external_id" doc:"What tells that a person is already in the directory"`
+	OnMatch  string               `json:"on_match" enum:"skip,fill,overwrite" doc:"skip leaves them alone, fill sets only what they have empty, overwrite sets every mapped value the file has"`
 }
 
-type importUploadForm struct {
+type contactImportForm struct {
 	File huma.FormFile `form:"file" required:"true" doc:"A .csv file, at most 50 MB"`
 }
 
@@ -156,7 +156,7 @@ var importAliases = []struct {
 
 // suggestImportMapping guesses the column of each field from the header names. A column is
 // used for one field only; aliases earlier in a field's list win.
-func suggestImportMapping(header []string, defs domain.FieldDefs) ImportMapping {
+func suggestImportMapping(header []string, defs domain.FieldDefs) ContactImportMapping {
 	normed := make([]string, len(header))
 	for i, h := range header {
 		normed[i] = imports.NormHeader(h)
@@ -171,7 +171,7 @@ func suggestImportMapping(header []string, defs domain.FieldDefs) ImportMapping 
 		}
 		return ""
 	}
-	var m ImportMapping
+	var m ContactImportMapping
 	for _, f := range importAliases {
 		c := pick(f.aliases...)
 		switch f.field {
@@ -207,7 +207,7 @@ func suggestImportMapping(header []string, defs domain.FieldDefs) ImportMapping 
 
 // checkImportMapping refuses a mapping that names a missing column or a field that is not
 // there, and one the people cannot be told apart by.
-func checkImportMapping(b importStartBody, header []string, defs domain.FieldDefs) error {
+func checkImportMapping(b contactImportStartBody, header []string, defs domain.FieldDefs) error {
 	for _, c := range b.Mapping.columns() {
 		if c != "" && !slices.Contains(header, c) {
 			return httpx.Validation("The file has no column called " + hd.Excerpt(c, 60) + ".")
@@ -281,46 +281,46 @@ func readStored(ctx context.Context, d *deps.Deps, key string) (*imports.CSVFile
 	return f, nil
 }
 
-func upload(ctx context.Context, d *deps.Deps, p *auth.Principal, f huma.FormFile) (ImportUpload, error) {
+func upload(ctx context.Context, d *deps.Deps, p *auth.Principal, f huma.FormFile) (ContactImportUpload, error) {
 	if f.Size > imports.MaxCSVBytes {
-		return ImportUpload{}, httpx.E(http.StatusRequestEntityTooLarge, "too_large", "CSV files can be at most 50 MB.")
+		return ContactImportUpload{}, httpx.E(http.StatusRequestEntityTooLarge, "too_large", "CSV files can be at most 50 MB.")
 	}
 	filename := hd.CleanFilename(f.Filename)
 	if ext := strings.ToLower(filepath.Ext(filename)); ext != ".csv" && ext != ".tsv" && ext != ".txt" {
-		return ImportUpload{}, httpx.E(http.StatusUnprocessableEntity, "file_type_refused", "Upload a .csv file. Spreadsheets can save one with File, then Download or Export, as CSV.")
+		return ContactImportUpload{}, httpx.E(http.StatusUnprocessableEntity, "file_type_refused", "Upload a .csv file. Spreadsheets can save one with File, then Download or Export, as CSV.")
 	}
 	raw, err := io.ReadAll(io.LimitReader(f.File, imports.MaxCSVBytes+1))
 	if err != nil {
-		return ImportUpload{}, err
+		return ContactImportUpload{}, err
 	}
 	if len(raw) > imports.MaxCSVBytes {
-		return ImportUpload{}, httpx.E(http.StatusRequestEntityTooLarge, "too_large", "CSV files can be at most 50 MB.")
+		return ContactImportUpload{}, httpx.E(http.StatusRequestEntityTooLarge, "too_large", "CSV files can be at most 50 MB.")
 	}
 	if len(raw) == 0 {
-		return ImportUpload{}, httpx.Validation("the file is empty")
+		return ContactImportUpload{}, httpx.Validation("the file is empty")
 	}
 	parsed, err := imports.ParseCSV(raw)
 	if err != nil {
-		return ImportUpload{}, httpx.E(http.StatusUnprocessableEntity, "csv_unreadable", err.Error())
+		return ContactImportUpload{}, httpx.E(http.StatusUnprocessableEntity, "csv_unreadable", err.Error())
 	}
 	defs, err := domain.LoadFieldDefs(ctx, d.DB.Pool, p.WorkspaceID, domain.FieldEntityContact)
 	if err != nil {
-		return ImportUpload{}, err
+		return ContactImportUpload{}, err
 	}
 	sum := sha256.Sum256(raw)
 	id := ids.New()
 	key := "workspaces/" + p.WorkspaceID.String() + "/imports/" + id.String() + ".csv"
 	if err := d.Storage.Put(ctx, key, bytes.NewReader(raw), int64(len(raw)), "text/csv"); err != nil {
-		return ImportUpload{}, err
+		return ContactImportUpload{}, err
 	}
 	if _, err := d.DB.Pool.Exec(ctx, `INSERT INTO import_uploads (id, workspace_id, storage_key, filename, sha256, size_bytes, created_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`, id, p.WorkspaceID, key, filename, hex.EncodeToString(sum[:]), len(raw), p.ActorUserID()); err != nil {
 		_ = d.Storage.Delete(context.WithoutCancel(ctx), key)
-		return ImportUpload{}, err
+		return ContactImportUpload{}, err
 	}
-	out := ImportUpload{UploadID: id, Filename: filename, Rows: len(parsed.Rows), Columns: []ImportColumn{}, Suggested: suggestImportMapping(parsed.Header, defs)}
+	out := ContactImportUpload{UploadID: id, Filename: filename, Rows: len(parsed.Rows), Columns: []ContactImportColumn{}, Suggested: suggestImportMapping(parsed.Header, defs)}
 	for i, h := range parsed.Header {
-		col := ImportColumn{Name: h, Samples: []string{}}
+		col := ContactImportColumn{Name: h, Samples: []string{}}
 		for _, rec := range parsed.Rows {
 			if len(col.Samples) >= 3 {
 				break
@@ -352,8 +352,8 @@ func registerImport(d *deps.Deps, api huma.API) {
 		Middlewares: huma.Middlewares{limitBody(api)},
 		Description: "UTF-8 or UTF-16 with a byte order mark, separated by commas, semicolons or tabs, with a header row. Answers its columns, a few values of each and the mapping guessed from the headers."},
 		func(ctx context.Context, in *struct {
-			RawBody huma.MultipartFormFiles[importUploadForm]
-		}) (*struct{ Body ImportUpload }, error) {
+			RawBody huma.MultipartFormFiles[contactImportForm]
+		}) (*struct{ Body ContactImportUpload }, error) {
 			if in.RawBody.Form != nil {
 				defer func(f *multipart.Form) { _ = f.RemoveAll() }(in.RawBody.Form)
 			}
@@ -373,11 +373,11 @@ func registerImport(d *deps.Deps, api huma.API) {
 			if err != nil {
 				return nil, httpx.Wrap(err)
 			}
-			return &struct{ Body ImportUpload }{out}, nil
+			return &struct{ Body ContactImportUpload }{out}, nil
 		})
 
 	huma.Register(api, op("start-contact-import", http.MethodPost, "/v1/contacts/imports", "Import people from an uploaded file", "Contacts", http.StatusCreated),
-		func(ctx context.Context, in *struct{ Body importStartBody }) (*struct{ Body ContactImport }, error) {
+		func(ctx context.Context, in *struct{ Body contactImportStartBody }) (*struct{ Body ContactImport }, error) {
 			p, err := auth.RequireWorkspace(ctx, auth.RoleAgent, auth.ScopeContactsWrite)
 			if err != nil {
 				return nil, httpx.Wrap(err)
