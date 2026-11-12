@@ -660,7 +660,16 @@
     "sendNow": "Envoyer maintenant",
     "changeTime": "Modifier l’heure",
     "cancelSchedule": "Annuler la programmation",
-    "scheduleReview": "Vérifiez les mentions et les champs à remplir avant de programmer cette réponse."
+    "scheduleReview": "Vérifiez les mentions et les champs à remplir avant de programmer cette réponse.",
+    "scheduleFailed": "La réponse programmée n’a pas été envoyée.",
+    "scheduleError": {
+      "merged": "Le ticket a été fusionné avec un autre, la réponse n’a donc pas été envoyée.",
+      "not_visible": "Le ticket n’existe plus ou vous ne pouvez plus le voir, la réponse n’a donc pas été envoyée.",
+      "cannot_send_from": "Vous ne pouvez plus envoyer depuis cette adresse, la réponse n’a donc pas été envoyée. Choisissez une autre adresse et renvoyez-la.",
+      "member_gone": "Vous ne pouvez plus répondre sur ce ticket, la réponse n’a donc pas été envoyée.",
+      "refused": "La réponse n’a pas pu être envoyée telle qu’elle était écrite à l’heure prévue. Vérifiez-la et renvoyez-la.",
+      "failed": "La réponse programmée n’a pas pu être envoyée. Renvoyez-la."
+    }
   },
   "sharedDraft": {
     "label": "Brouillon partagé",

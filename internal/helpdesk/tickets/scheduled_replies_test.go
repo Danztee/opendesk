@@ -136,7 +136,63 @@ func TestScheduledReply(t *testing.T) {
 	send(at)
 	e.Exec(`UPDATE members SET role = 'agent' WHERE workspace_id = $1 AND user_id = $2`, ws.ID, ws.Agent.ID)
 	e.Do("GET", base, as, nil).Want(t, 200).JSON(t, &got)
-	if replies() != 4 || got.Draft == nil || got.Draft.Schedule != nil || got.Draft.SendError == "" {
+	if replies() != 4 || got.Draft == nil || got.Draft.Schedule != nil || got.Draft.SendError != tickets.SendErrorMemberGone {
 		t.Fatalf("kept after a refused send: %+v", got.Draft)
+	}
+	// They are told, and their reply box follows live.
+	if countRows(t, e, `SELECT count(*) FROM notifications WHERE user_id = $1 AND ticket_id = $2 AND type = 'scheduled_reply_failed'
+		AND data->>'reason' = 'member_gone'`, ws.Agent.ID, tk.ID) != 1 {
+		t.Fatal("no scheduled_reply_failed notification")
+	}
+	if countRows(t, e, `SELECT count(*) FROM events WHERE workspace_id = $1 AND type = 'reply_draft.updated' AND user_ids = ARRAY[$2]::uuid[]`, ws.ID, ws.Agent.ID) == 0 {
+		t.Fatal("no reply_draft.updated to its author alone")
+	}
+}
+
+// TestScheduledReplyMerged: a reply scheduled on a ticket merged since never goes out from the
+// closed source ticket: the merge keeps it as its author's draft, and sending or scheduling on
+// the merged ticket is refused.
+func TestScheduledReplyMerged(t *testing.T) {
+	e := hdtest.New(t, tickets.Register)
+	ws := e.NewWorkspace()
+	src := createTicket(t, e, ws, map[string]any{"subject": "First", "contact": map[string]any{"email": "merge@example.com", "name": "Mo"}})
+	dst := createTicket(t, e, ws, map[string]any{"subject": "Second", "contact": map[string]any{"email": "merge@example.com", "name": "Mo"}})
+	base := "/v1/tickets/" + src.ID.String() + "/reply-draft"
+	as := ws.Agent.As(ws)
+	reply := map[string]any{"kind": "reply", "body_html": "<p>Following up.</p>"}
+	at := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	count := func() int {
+		return countRows(t, e, `SELECT count(*) FROM messages WHERE kind = 'reply' AND author_user_id = $1 AND body_text LIKE 'Following up%'`, ws.Agent.ID)
+	}
+
+	// An admin merges it: the agent's scheduled reply stays their draft, and they are told.
+	e.Do("POST", base+"/schedule", as, map[string]any{"send_at": at, "reply": reply}).Want(t, 200)
+	e.Do("POST", "/v1/tickets/"+src.ID.String()+"/merge", ws.Admin.As(ws), map[string]any{"into_id": dst.ID.String()}).Want(t, 200)
+	var got struct{ Draft *tickets.ReplyDraft }
+	e.Do("GET", base, as, nil).Want(t, 200).JSON(t, &got)
+	if got.Draft == nil || got.Draft.Schedule != nil || got.Draft.SendError != tickets.SendErrorMerged {
+		t.Fatalf("after the merge: %+v", got.Draft)
+	}
+	if countRows(t, e, `SELECT count(*) FROM notifications WHERE user_id = $1 AND type = 'scheduled_reply_failed' AND data->>'reason' = 'merged'`, ws.Agent.ID) != 1 {
+		t.Fatal("the author was not told the merge stopped their reply")
+	}
+	if err := tickets.SendScheduledReply(e.Ctx, e.D, jobs.ScheduledReplyArgs{WorkspaceID: ws.ID, TicketID: src.ID, UserID: ws.Agent.ID, SendAt: at}, false); err != nil {
+		t.Fatal(err)
+	}
+	if count() != 0 {
+		t.Fatal("a reply scheduled on a merged ticket went out")
+	}
+	// Nor can it be scheduled or sent there again.
+	e.Do("POST", base+"/schedule", as, map[string]any{"send_at": at, "reply": reply}).Want(t, 409)
+
+	// A job that finds the ticket merged (the draft still scheduled) keeps it with the reason.
+	e.Exec(`UPDATE ticket_reply_drafts SET send_at = $2, send_request = '{"kind":"reply"}', send_error = '' WHERE ticket_id = $1`, src.ID, at)
+	e.Do("POST", base+"/send", as, nil).Want(t, 409)
+	if err := tickets.SendScheduledReply(e.Ctx, e.D, jobs.ScheduledReplyArgs{WorkspaceID: ws.ID, TicketID: src.ID, UserID: ws.Agent.ID, SendAt: at}, false); err != nil {
+		t.Fatal(err)
+	}
+	e.Do("GET", base, as, nil).Want(t, 200).JSON(t, &got)
+	if count() != 0 || got.Draft == nil || got.Draft.Schedule != nil || got.Draft.SendError != tickets.SendErrorMerged {
+		t.Fatalf("job on a merged ticket: sent %d, draft %+v", count(), got.Draft)
 	}
 }

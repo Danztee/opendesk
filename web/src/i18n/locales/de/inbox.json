@@ -643,7 +643,16 @@
     "sendNow": "Jetzt senden",
     "changeTime": "Zeit ändern",
     "cancelSchedule": "Planung abbrechen",
-    "scheduleReview": "Prüfe Erwähnungen und Platzhalter, bevor du diese Antwort planst."
+    "scheduleReview": "Prüfe Erwähnungen und Platzhalter, bevor du diese Antwort planst.",
+    "scheduleFailed": "Die geplante Antwort wurde nicht gesendet.",
+    "scheduleError": {
+      "merged": "Das Ticket wurde mit einem anderen zusammengeführt, daher wurde die Antwort nicht gesendet.",
+      "not_visible": "Das Ticket ist nicht mehr da oder du kannst es nicht mehr sehen, daher wurde die Antwort nicht gesendet.",
+      "cannot_send_from": "Du kannst nicht mehr von dieser Adresse senden, daher wurde die Antwort nicht gesendet. Wähle eine andere Adresse und sende sie erneut.",
+      "member_gone": "Du kannst auf dieses Ticket nicht mehr antworten, daher wurde die Antwort nicht gesendet.",
+      "refused": "Die Antwort konnte zum geplanten Zeitpunkt nicht so gesendet werden, wie sie geschrieben war. Prüfe sie und sende sie erneut.",
+      "failed": "Die geplante Antwort konnte nicht gesendet werden. Sende sie erneut."
+    }
   },
   "sharedDraft": {
     "label": "Geteilter Entwurf",

@@ -109,7 +109,10 @@ export function registerDrafts() {
     if (!draft?.schedule) throw notFound("Scheduled reply");
     if ((ctx.ws.members.find((m) => m.user_id === db.meId)?.role ?? "viewer") === "viewer") throw forbidden();
     const result = await dispatch(`http://mock/v1/tickets/${ticket.id}/messages`, { method: "POST", headers: ctx.headers, body: JSON.stringify(requests.get(draft)) });
-    if (result.ok) ownDrafts(ctx.ws).delete(ticket.id);
+    if (result.ok) {
+      ownDrafts(ctx.ws).delete(ticket.id);
+      publish(ctx.ws, "reply_draft.updated", { ticket_id: ticket.id, draft: null }, { topics: [`user:${db.meId}`] });
+    }
     return result;
   };
   post("/v1/tickets/:id/reply-draft/send", send);
@@ -128,7 +131,12 @@ export function registerDrafts() {
     const due = () => {
       if (ownDrafts(ctx.ws).get(ticket.id) !== draft || !draft.schedule) return;
       if (at > Date.now()) { setTimeout(due, Math.min(at - Date.now(), 2147483647)); return; }
-      void send(ctx).then(async (r) => { if (!r.ok) { draft.schedule = null; draft.send_error = "The scheduled reply could not be sent. Send it again."; } });
+      void send(ctx).then((r) => {
+        if (r.ok) return;
+        draft.schedule = null;
+        draft.send_error = "failed";
+        publish(ctx.ws, "reply_draft.updated", { ticket_id: ticket.id, draft }, { topics: [`user:${db.meId}`] });
+      });
     };
     setTimeout(due, Math.min(at - Date.now(), 2147483647));
     return respond(200, { draft });

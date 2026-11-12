@@ -29,7 +29,8 @@ export function useReplyDraftSync({
   attachmentIds: string[];
   onRestore: (draft: ReplyDraft) => void;
 }): { settled: boolean; draft: ReplyDraft | null | undefined } {
-  const { data, isPending, isError } = useQuery({ ...q.replyDraft(ticketId), enabled, refetchInterval: (query) => query.state.data?.schedule ? Math.min(2147483647, Math.max(5000, Date.parse(query.state.data.schedule.send_at) - Date.now() + 1000)) : false });
+  // A scheduled reply going out, or kept with why it did not, arrives as reply_draft.updated.
+  const { data, isPending, isError } = useQuery({ ...q.replyDraft(ticketId), enabled });
   const scheduled = useRef(false);
   scheduled.current = !!data?.schedule;
   const settled = !enabled || !isPending || isError;
