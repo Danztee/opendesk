@@ -48,7 +48,7 @@ func assertAuth(t *testing.T, r *http.Request) {
 func assertConversationQuery(t *testing.T, r *http.Request) {
 	t.Helper()
 	q := r.URL.Query()
-	for k, want := range map[string]string{"status": "active,pending,closed,spam", "state": "published", "sortField": "createdAt", "sortOrder": "asc", "embed": "threads,tags"} {
+	for k, want := range map[string]string{"status": "active,pending,closed,spam", "state": "published", "sortField": "createdAt", "sortOrder": "asc", "embed": "threads,tags", "pageSize": "25"} {
 		if q.Get(k) != want {
 			t.Errorf("%s = %q, want %q", k, q.Get(k), want)
 		}
@@ -109,7 +109,9 @@ func TestCheckPagination(t *testing.T) {
 				writeJSON(t, w, response("users", []any{map[string]any{"id": 9, "email": "bea@example.org"}}, 2, 2, 2))
 			}
 		case "/support/api/conversations":
-			assertConversationQuery(t, r)
+			if q := r.URL.Query(); q.Get("pageSize") != "1" || q.Has("embed") || q.Get("state") != "published" {
+				t.Errorf("count query = %v", q)
+			}
 			writeJSON(t, w, response("conversations", []any{}, 1, 17, 1))
 		default:
 			t.Errorf("unexpected endpoint %s", r.URL.Path)
@@ -205,7 +207,7 @@ func TestLoadEmbeddedThreadsAndAttachments(t *testing.T) {
 		customer := threadFixture(10, "customer", "published", "2024-01-01T01:00:00Z")
 		customer["customer"] = map[string]any{"id": 91, "firstName": "Rodney", "email": "rodney@example.org"}
 		customer["_embedded"] = map[string]any{"attachments": []any{map[string]any{"id": 71, "fileName": "example.pdf", "fileUrl": "/storage/example.pdf", "mimeType": "application/pdf", "size": 2331}}}
-		threads := []any{threadFixture(13, "note", "published", "2024-01-03T01:00:00Z"), threadFixture(12, "message", "published", "2024-01-02T01:00:00Z"), customer, threadFixture(14, "message", "draft", "2024-01-04T01:00:00Z"), threadFixture(15, "lineitem", "published", "2024-01-05T01:00:00Z"), threadFixture(16, "note", "deleted", "2024-01-06T01:00:00Z")}
+		threads := []any{threadFixture(13, "note", "published", "2024-01-03T01:00:00Z"), threadFixture(12, "message", "published", "2024-01-02T01:00:00Z"), customer, threadFixture(14, "message", "draft", "2024-01-04T01:00:00Z"), threadFixture(15, "lineitem", "published", "2024-01-05T01:00:00Z"), threadFixture(16, "note", "hidden", "2024-01-06T01:00:00Z"), threadFixture(17, "note", "review", "2024-01-07T01:00:00Z"), threadFixture(18, "message", "", "2024-01-08T01:00:00Z")}
 		c["threadsCount"] = len(threads)
 		c["_embedded"].(map[string]any)["threads"] = threads
 		writeJSON(t, w, c)
@@ -214,7 +216,7 @@ func TestLoadEmbeddedThreadsAndAttachments(t *testing.T) {
 	if err := s.Load(context.Background(), &ticket); err != nil {
 		t.Fatal(err)
 	}
-	if !ticket.Loaded || len(ticket.Messages) != 3 {
+	if !ticket.Loaded || len(ticket.Messages) != 4 || ticket.Messages[3].ID != "18" {
 		t.Fatalf("ticket = %+v", ticket)
 	}
 	customer, reply, note := ticket.Messages[0], ticket.Messages[1], ticket.Messages[2]
@@ -249,6 +251,39 @@ func TestLoadRefusesTruncatedThreads(t *testing.T) {
 	ticket := source.Ticket{ID: "1"}
 	if err := s.Load(context.Background(), &ticket); err == nil || ticket.Loaded {
 		t.Fatal("truncated conversation accepted as complete")
+	}
+}
+
+func TestListingThreadCountMarksTruncatedThreads(t *testing.T) {
+	t.Parallel()
+	s, _ := testSource(t, func(w http.ResponseWriter, r *http.Request) {
+		c := conversationFixture(1, "active", "published")
+		delete(c, "threadsCount")
+		c["threads"] = 2
+		c["_embedded"].(map[string]any)["threads"] = []any{threadFixture(1, "customer", "published", "2024-01-01T00:00:00Z")}
+		writeJSON(t, w, response("conversations", []any{c}, 1, 1, 1))
+	})
+	page, err := s.Tickets(context.Background(), "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Loaded {
+		t.Fatalf("listing with fewer threads than its count marked loaded: %+v", page.Items)
+	}
+}
+
+func TestParseTime(t *testing.T) {
+	t.Parallel()
+	want := time.Date(2024, 3, 5, 14, 7, 9, 0, time.UTC)
+	for _, in := range []string{"2024-03-05T14:07:09Z", "2024-03-05T16:07:09+02:00", "2024-03-05T14-07-09Z", " 2024-03-05T14-07-09Z "} {
+		if got := parseTime(in); !got.Equal(want) || got.Location() != time.UTC {
+			t.Errorf("parseTime(%q) = %v", in, got)
+		}
+	}
+	for _, in := range []string{"", "yesterday", "2024-03-05"} {
+		if got := parseTime(in); !got.IsZero() {
+			t.Errorf("parseTime(%q) = %v, want zero", in, got)
+		}
 	}
 }
 

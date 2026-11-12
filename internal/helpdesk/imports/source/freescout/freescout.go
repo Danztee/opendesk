@@ -187,8 +187,11 @@ func (s *freescout) Check(ctx context.Context) (source.Scan, error) {
 		}
 		scan.Agents = append(scan.Agents, source.Agent{ID: id(p.ID), Name: name, Email: strings.TrimSpace(p.Email)})
 	}
+	q := conversationQuery(1, nil, nil)
+	q.Set("pageSize", "1")
+	q.Del("embed")
 	var out listing[conversation]
-	if err := s.get(ctx, "/api/conversations", conversationQuery(1, nil, nil), &out); err != nil {
+	if err := s.get(ctx, "/api/conversations", q, &out); err != nil {
 		return scan, err
 	}
 	scan.Tickets = out.Page.TotalElements
@@ -196,20 +199,21 @@ func (s *freescout) Check(ctx context.Context) (source.Scan, error) {
 }
 
 type conversation struct {
-	ID        int64   `json:"id"`
-	Number    int64   `json:"number"`
-	Threads   int     `json:"threadsCount"`
-	Type      string  `json:"type"`
-	Status    string  `json:"status"`
-	State     string  `json:"state"`
-	Subject   string  `json:"subject"`
-	MailboxID int64   `json:"mailboxId"`
-	Assignee  *person `json:"assignee"`
-	Customer  *person `json:"customer"`
-	CreatedAt string  `json:"createdAt"`
-	UpdatedAt string  `json:"updatedAt"`
-	ClosedAt  string  `json:"closedAt"`
-	Embedded  struct {
+	ID          int64   `json:"id"`
+	Number      int64   `json:"number"`
+	Threads     int     `json:"threadsCount"`
+	ListThreads int     `json:"threads"` // a listing's name for the thread count
+	Type        string  `json:"type"`
+	Status      string  `json:"status"`
+	State       string  `json:"state"`
+	Subject     string  `json:"subject"`
+	MailboxID   int64   `json:"mailboxId"`
+	Assignee    *person `json:"assignee"`
+	Customer    *person `json:"customer"`
+	CreatedAt   string  `json:"createdAt"`
+	UpdatedAt   string  `json:"updatedAt"`
+	ClosedAt    string  `json:"closedAt"`
+	Embedded    struct {
 		Threads []thread `json:"threads"`
 		Tags    []struct {
 			Name string `json:"name"`
@@ -237,8 +241,12 @@ type thread struct {
 	} `json:"_embedded"`
 }
 
+func (c conversation) threadCount() int { return max(c.Threads, c.ListThreads) }
+
+// conversationQuery lists 25 conversations a page: each carries its threads, and one
+// answer must stay within the client's size limit.
 func conversationQuery(n int, since, updated *time.Time) url.Values {
-	q := url.Values{"status": {"active,pending,closed,spam"}, "state": {"published"}, "embed": {"threads,tags"}, "sortField": {"createdAt"}, "sortOrder": {"asc"}, "page": {strconv.Itoa(n)}, "pageSize": {"100"}}
+	q := url.Values{"status": {"active,pending,closed,spam"}, "state": {"published"}, "embed": {"threads,tags"}, "sortField": {"createdAt"}, "sortOrder": {"asc"}, "page": {strconv.Itoa(n)}, "pageSize": {"25"}}
 	if since != nil {
 		q.Set("createdSince", since.UTC().Format(time.RFC3339))
 	}
@@ -273,7 +281,7 @@ func (s *freescout) Tickets(ctx context.Context, cursor string, since, updated *
 	return result, nil
 }
 func (s *freescout) ticket(c conversation) source.Ticket {
-	t := source.Ticket{ID: id(c.ID), Ref: "#" + strconv.FormatInt(c.Number, 10), URL: s.account.URL + "/conversation/" + id(c.ID), Subject: strings.TrimSpace(c.Subject), Priority: "normal", Channel: "email", GroupID: id(c.MailboxID), CreatedAt: source.Time(c.CreatedAt), UpdatedAt: source.Time(c.UpdatedAt)}
+	t := source.Ticket{ID: id(c.ID), Ref: "#" + strconv.FormatInt(c.Number, 10), URL: s.account.URL + "/conversation/" + id(c.ID), Subject: strings.TrimSpace(c.Subject), Priority: "normal", Channel: "email", GroupID: id(c.MailboxID), CreatedAt: parseTime(c.CreatedAt), UpdatedAt: parseTime(c.UpdatedAt)}
 	switch c.Status {
 	case "active":
 		t.Status = "open"
@@ -300,7 +308,7 @@ func (s *freescout) ticket(c conversation) source.Ticket {
 		p := c.Customer.person()
 		t.Requester = &p
 	}
-	if at := source.Time(c.ClosedAt); !at.IsZero() {
+	if at := parseTime(c.ClosedAt); !at.IsZero() {
 		t.SolvedAt = &at
 	}
 	if t.UpdatedAt.IsZero() {
@@ -311,13 +319,13 @@ func (s *freescout) ticket(c conversation) source.Ticket {
 	}
 	t.Tags = source.Strings(t.Tags)
 	t.Messages = messages(c.Embedded.Threads)
-	t.Loaded = c.Embedded.Threads != nil && len(c.Embedded.Threads) >= c.Threads
+	t.Loaded = c.Embedded.Threads != nil && len(c.Embedded.Threads) >= c.threadCount()
 	return t
 }
 func messages(threads []thread) []source.Message {
 	ts := append([]thread(nil), threads...)
 	sort.SliceStable(ts, func(i, j int) bool {
-		a, b := source.Time(ts[i].CreatedAt), source.Time(ts[j].CreatedAt)
+		a, b := parseTime(ts[i].CreatedAt), parseTime(ts[j].CreatedAt)
 		if a.Equal(b) {
 			return ts[i].ID < ts[j].ID
 		}
@@ -325,7 +333,8 @@ func messages(threads []thread) []source.Message {
 	})
 	var out []source.Message
 	for _, th := range ts {
-		if th.State != "published" {
+		switch th.State {
+		case "draft", "hidden", "review":
 			continue
 		}
 		if th.Type != "customer" && th.Type != "message" && th.Type != "note" {
@@ -335,7 +344,7 @@ func messages(threads []thread) []source.Message {
 		if th.Type == "customer" && th.Customer != nil {
 			p = *th.Customer
 		}
-		m := source.Message{ID: id(th.ID), Agent: th.Type != "customer", Note: th.Type == "note", Author: p.person(), HTML: th.Body, To: source.Strings(th.To), Cc: source.Strings(th.Cc), CreatedAt: source.Time(th.CreatedAt)}
+		m := source.Message{ID: id(th.ID), Agent: th.Type != "customer", Note: th.Type == "note", Author: p.person(), HTML: th.Body, To: source.Strings(th.To), Cc: source.Strings(th.Cc), CreatedAt: parseTime(th.CreatedAt)}
 		if m.Agent {
 			m.AuthorID = id(p.ID)
 		}
@@ -360,7 +369,7 @@ func (s *freescout) Load(ctx context.Context, t *source.Ticket) error {
 	if err := s.get(ctx, "/api/conversations/"+id(n), url.Values{"embed": {"threads,tags"}}, &c); err != nil {
 		return err
 	}
-	if c.ID != n || c.Embedded.Threads == nil || len(c.Embedded.Threads) < c.Threads {
+	if c.ID != n || c.Embedded.Threads == nil || len(c.Embedded.Threads) < c.threadCount() {
 		return errors.New("freescout returned an incomplete conversation")
 	}
 	*t = s.ticket(c)
@@ -377,4 +386,16 @@ func (s *freescout) Download(ctx context.Context, a source.Attachment) (io.ReadC
 	}
 	rd, err := s.api.Open(ctx, u.String())
 	return rd, safeError(err)
+}
+
+// parseTime reads RFC 3339, then the 2006-01-02T15-04-05Z form FreeScout's docs show.
+func parseTime(s string) time.Time {
+	if t := source.Time(s); !t.IsZero() {
+		return t
+	}
+	t, err := time.Parse("2006-01-02T15-04-05Z", strings.TrimSpace(s))
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }

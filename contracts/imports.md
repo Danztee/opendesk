@@ -139,7 +139,6 @@ Credentials by source (all strings):
 | `freshdesk` | `domain` (`acme`, `acme.freshdesk.com` or its URL), `api_key` (profile picture → Profile settings → View API key). An admin's key also reads the account's name |
 | `intercom` | `token` (Developer Hub → your app → Configure → Authentication → access token), `region` (`us` default, `eu`, `au`) |
 | `front` | `token` (an admin: Settings → Developers → API Tokens → Create API token, Access resources, Shared resources with all shared workspaces, read permission). A sync reads the events feed and walks the inboxes when the token cannot. Articles are not imported |
-
 | `freescout` | `url` (the HTTPS instance address, including an installation subdirectory if any), `api_key` (Manage → Settings → API & Webhooks; requires the API & Webhooks module and access to the mailboxes and users being imported). Authentication uses `X-FreeScout-API-Key`, never a URL parameter. Articles are not imported |
 
 ## Endpoints
@@ -299,12 +298,12 @@ the encoding, a line that cannot be read, more than 500,000 rows, no rows under 
 FreeScout uses its API & Webhooks module. The importer reads published conversations in all
 statuses, with customer messages, agent replies, internal notes and attachments. Mailboxes
 map to teams and users to agents. Active conversations become open, pending stays pending,
-and closed stays closed. Spam, deleted conversations and draft threads are skipped. Notes
-stay internal. Help center articles are not available through this API.
+and closed stays closed. Spam, deleted conversations and draft, hidden and review threads
+are skipped. Notes stay internal. Help center articles are not available through this API.
 
-Listings are read oldest first with numbered pages. `since` uses `createdSince`; sync uses
-`updatedSince`. The source instance URL identifies the account, including a subdirectory
-installation. Re-importing that account uses the existing import records to avoid duplicates.
+Listings are read oldest first with numbered pages of 25 conversations, each with its
+threads. `since` uses `createdSince`; sync uses `updatedSince`. The source instance URL
+identifies the account, including a subdirectory installation. Re-importing that account uses the existing import records to avoid duplicates.
 
 ## Security
 
