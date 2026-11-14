@@ -172,7 +172,12 @@
     "folderSelected_one": "The {{count}} conversation in {{scope}} is selected.",
     "folderSelected_other": "All {{count}} conversations in {{scope}} are selected.",
     "firstSelected_one": "The first {{count}} conversation in {{scope}} is selected.",
-    "firstSelected_other": "The first {{count}} conversations in {{scope}} are selected."
+    "firstSelected_other": "The first {{count}} conversations in {{scope}} are selected.",
+    "selectEveryMatching": "Select every conversation matching your search",
+    "folderSelectedMatching_one": "The {{count}} conversation matching your search is selected.",
+    "folderSelectedMatching_other": "All {{count}} conversations matching your search are selected.",
+    "firstSelectedMatching_one": "The first {{count}} conversation matching your search is selected.",
+    "firstSelectedMatching_other": "The first {{count}} conversations matching your search are selected."
   },
   "action": {
     "archive": "Archive",

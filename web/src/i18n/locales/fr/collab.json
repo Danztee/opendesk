@@ -169,7 +169,14 @@
     "folderSelected_many": "Les {{count}} conversations de {{scope}} sont toutes sélectionnées.",
     "firstSelected_one": "La première conversation ({{count}}) de {{scope}} est sélectionnée.",
     "firstSelected_other": "Les {{count}} premières conversations de {{scope}} sont sélectionnées.",
-    "firstSelected_many": "Les {{count}} premières conversations de {{scope}} sont sélectionnées."
+    "firstSelected_many": "Les {{count}} premières conversations de {{scope}} sont sélectionnées.",
+    "selectEveryMatching": "Sélectionner toutes les conversations correspondant à votre recherche",
+    "folderSelectedMatching_one": "La {{count}} conversation correspondant à votre recherche est sélectionnée.",
+    "folderSelectedMatching_other": "Les {{count}} conversations correspondant à votre recherche sont toutes sélectionnées.",
+    "folderSelectedMatching_many": "Les {{count}} conversations correspondant à votre recherche sont toutes sélectionnées.",
+    "firstSelectedMatching_one": "La première conversation ({{count}}) correspondant à votre recherche est sélectionnée.",
+    "firstSelectedMatching_other": "Les {{count}} premières conversations correspondant à votre recherche sont sélectionnées.",
+    "firstSelectedMatching_many": "Les {{count}} premières conversations correspondant à votre recherche sont sélectionnées."
   },
   "action": {
     "archive": "Archiver",

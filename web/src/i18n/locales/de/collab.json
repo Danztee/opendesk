@@ -167,7 +167,12 @@
     "folderSelected_one": "Die {{count}} Unterhaltung in {{scope}} ist ausgewählt.",
     "folderSelected_other": "Alle {{count}} Unterhaltungen in {{scope}} sind ausgewählt.",
     "firstSelected_one": "Die erste Unterhaltung ({{count}}) in {{scope}} ist ausgewählt.",
-    "firstSelected_other": "Die ersten {{count}} Unterhaltungen in {{scope}} sind ausgewählt."
+    "firstSelected_other": "Die ersten {{count}} Unterhaltungen in {{scope}} sind ausgewählt.",
+    "selectEveryMatching": "Alle Unterhaltungen zu deiner Suche auswählen",
+    "folderSelectedMatching_one": "Die {{count}} Unterhaltung zu deiner Suche ist ausgewählt.",
+    "folderSelectedMatching_other": "Alle {{count}} Unterhaltungen zu deiner Suche sind ausgewählt.",
+    "firstSelectedMatching_one": "Die erste Unterhaltung ({{count}}) zu deiner Suche ist ausgewählt.",
+    "firstSelectedMatching_other": "Die ersten {{count}} Unterhaltungen zu deiner Suche sind ausgewählt."
   },
   "action": {
     "archive": "Archivieren",

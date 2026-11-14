@@ -258,8 +258,8 @@ right away) and, except for the local handling actions, at the provider by the j
 brings back the provider's state.
 
 A request takes up to 100 conversations. The web app's list has a master checkbox above it (one
-click selects the conversations loaded, one more every conversation of the box or folder in view,
-up to 1000) and sends a longer selection as one request per hundred, in order; selecting never
+click selects the conversations loaded, one more every conversation of the box, folder, tab or
+search in view, up to 1000; clearing the selection or leaving the list stops it) and sends a longer selection as one request per hundred, in order; selecting never
 changes mail, an action does.
 
 | action | Gmail | Microsoft | IMAP |

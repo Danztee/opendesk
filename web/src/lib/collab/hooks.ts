@@ -1,10 +1,10 @@
 // Collab hooks: the feature gate, accounts, the sidebar prefs (saved optimistically)
 // and thread actions with rollback.
 
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/endpoints";
-import type { MailAccount, MailCounts, MailFolder, MailThread, MailThreadAction, SidebarPrefs } from "../api/types";
+import type { MailAccount, MailCounts, MailFolder, MailThread, MailThreadAction, Page, SidebarPrefs } from "../api/types";
 import { qk, q, removeFromList, upsertInList } from "../queries";
 import { atLeast, useRole } from "../session";
 import { applyAction, countsAfter } from "./actions";
@@ -100,6 +100,53 @@ export function useSaveSidebarPrefs() {
 /** Whether the caller can act in Collab at all (viewers read only). */
 export function useCanAct(): boolean {
   return atLeast(useRole(), "agent");
+}
+
+/** The most conversations "select every conversation" loads and selects at once. */
+export const SELECT_ALL_MAX = 1000;
+
+type MailList = {
+  data?: InfiniteData<Page<MailThread>>;
+  hasNextPage: boolean;
+  fetchNextPage: () => Promise<{ data?: InfiniteData<Page<MailThread>>; hasNextPage: boolean; isError: boolean }>;
+};
+
+/**
+ * Selects every conversation of the list in view, its remaining pages loaded first, up to
+ * SELECT_ALL_MAX. Another list (listKey) or stop() ends a run: it loads and selects nothing more.
+ */
+export function useSelectEvery(list: MailList, listKey: string, select: (ids: Set<string>) => void) {
+  const [running, setRunning] = useState(false);
+  // Each run, each stop and each new list takes the next number; a run goes on while it holds the latest.
+  // A layout effect, so the number moves before the list's observer switches to the new query.
+  const run = useRef(0);
+  useLayoutEffect(() => {
+    run.current++;
+    setRunning(false);
+  }, [listKey]);
+  const stop = () => {
+    run.current++;
+    setRunning(false);
+  };
+  const start = async () => {
+    const mine = ++run.current;
+    setRunning(true);
+    try {
+      let pages = list.data?.pages ?? [];
+      let more = list.hasNextPage;
+      while (more && pages.reduce((n, p) => n + p.data.length, 0) < SELECT_ALL_MAX) {
+        const r = await list.fetchNextPage();
+        if (mine !== run.current) return;
+        if (r.isError || !r.data) break;
+        pages = r.data.pages;
+        more = r.hasNextPage;
+      }
+      select(new Set(pages.flatMap((p) => p.data).slice(0, SELECT_ALL_MAX).map((x) => x.id)));
+    } finally {
+      if (mine === run.current) setRunning(false);
+    }
+  };
+  return { running, start, stop };
 }
 
 /** The most conversations one POST /v1/collab/threads/actions takes. */

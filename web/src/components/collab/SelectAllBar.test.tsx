@@ -2,7 +2,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
-import { SelectAllBar, SELECT_ALL_MAX, type SelectAllBarProps } from "./SelectAllBar";
+import { SELECT_ALL_MAX } from "@/lib/collab/hooks";
+import { SelectAllBar, type SelectAllBarProps } from "./SelectAllBar";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -70,10 +71,23 @@ describe("SelectAllBar", () => {
     expect(container.textContent).not.toContain("Select every conversation");
   });
 
-  it("disables the checkbox while loading the rest or when the list is empty", async () => {
-    await show({ selected: 50, loading: true });
-    expect(box().disabled).toBe(true);
+  it("names a search's results by what they match, never by the box", async () => {
+    await show({ selected: 50, matching: true });
+    expect(container.textContent).toContain("Select every conversation matching your search");
+    expect(container.textContent).not.toContain("Spam");
+    await show({ loaded: 37 + 50, selected: 37 + 50, hasMore: false, matching: true });
+    expect(container.textContent).toContain("All 87 conversations matching your search are selected.");
+    await show({ loaded: SELECT_ALL_MAX, selected: SELECT_ALL_MAX, hasMore: true, matching: true });
+    expect(container.textContent).toContain(`The first ${SELECT_ALL_MAX} conversations matching your search are selected.`);
+  });
+
+  it("lets the checkbox stop loading the rest, and disables it only when the list is empty", async () => {
+    const p = await show({ selected: 50, loading: true });
+    expect(box().disabled).toBe(false);
+    expect(box().getAttribute("aria-label")).toBe("Clear selection");
     expect(container.textContent).toContain("Selecting every conversation");
+    await act(async () => box().click());
+    expect(p.onToggle).toHaveBeenCalledTimes(1);
     await show({ loaded: 0, hasMore: false });
     expect(box().disabled).toBe(true);
   });
