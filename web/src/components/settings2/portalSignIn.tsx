@@ -55,7 +55,7 @@ export function PortalSignInSection({ brand }: { brand: Brand }) {
   const { data } = useQuery({ queryKey: qk.brandPortalAuth(brand.id), queryFn: () => api.brands.portalAuth(brand.id) });
   return (
     <Section title={t("portalAuth.title")} description={t("portalAuth.hint", { name: brand.name })}>
-      {data ? <Form key={`${data.mode}:${data.protocol}:${data.issuer}:${data.client_id}:${data.create_contacts}:${data.saml.idp_entity_id}:${data.saml.idp_sso_url}`} brand={brand} saved={data} /> : null}
+      {data ? <Form key={`${data.mode}:${data.protocol}:${data.issuer}:${data.client_id}:${data.create_contacts}:${data.saml.idp_entity_id}:${data.saml.idp_sso_url}:${data.saml.idp_certificates}:${data.saml.email_attribute}:${data.saml.name_attribute}`} brand={brand} saved={data} /> : null}
       {data && data.mode !== "local" && <RelinkRow brand={brand} />}
     </Section>
   );
@@ -77,7 +77,7 @@ function Form({ brand, saved }: { brand: Brand; saved: PortalAuthSettings }) {
   const dirty = draft.mode !== base.mode || (provider && (draft.secret !== "" || keys.some((k) => draft[k] !== base[k])));
   const needsSecret = provider && !saml && (draft.protocol !== base.protocol || !saved.secret_configured) && !draft.secret.trim();
   const ready = !provider || (saml
-    ? !!draft.samlEntity.trim() && /^https:\/\/\S+$/.test(draft.samlUrl.trim()) && draft.samlCerts.includes("BEGIN CERTIFICATE")
+    ? !!draft.samlEntity.trim() && /^https:\/\/\S+$/.test(draft.samlUrl.trim()) && !!draft.samlCerts.trim()
     : /^https:\/\/\S+$/.test(draft.issuer.trim()) && !!draft.clientId.trim() && !needsSecret);
 
   const save = useMutation({
@@ -171,26 +171,26 @@ function Form({ brand, saved }: { brand: Brand; saved: PortalAuthSettings }) {
           ) : (
             <>
               <Row label={t("portalAuth.issuer")} description={t("portalAuth.issuerHint")} htmlFor="portal-issuer">
-            <TextInput id="portal-issuer" className="mono w-[320px]" spellCheck={false} placeholder="https://login.acme.com" value={draft.issuer} onChange={(e) => set({ issuer: e.target.value })} />
+                <TextInput id="portal-issuer" className="mono w-[320px]" spellCheck={false} placeholder="https://login.acme.com" value={draft.issuer} onChange={(e) => set({ issuer: e.target.value })} />
               </Row>
               <Row label={t("portalAuth.clientId")} htmlFor="portal-client-id">
-            <TextInput id="portal-client-id" className="mono w-[320px]" spellCheck={false} autoComplete="off" value={draft.clientId} onChange={(e) => set({ clientId: e.target.value })} />
+                <TextInput id="portal-client-id" className="mono w-[320px]" spellCheck={false} autoComplete="off" value={draft.clientId} onChange={(e) => set({ clientId: e.target.value })} />
               </Row>
               <Row label={t("portalAuth.secret")} description={t("portalAuth.secretHint")} htmlFor="portal-secret">
-            <TextInput
-              id="portal-secret"
-              className="mono w-[320px]"
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder={saved.secret_configured ? t("portalAuth.secretSaved") : ""}
-              value={draft.secret}
-              onChange={(e) => set({ secret: e.target.value })}
-            />
+                <TextInput
+                  id="portal-secret"
+                  className="mono w-[320px]"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={saved.secret_configured ? t("portalAuth.secretSaved") : ""}
+                  value={draft.secret}
+                  onChange={(e) => set({ secret: e.target.value })}
+                />
               </Row>
               <Row label={t("portalAuth.callback")} description={t("portalAuth.callbackHint")}>
-            <span className="mono max-w-[300px] truncate text-[12px] text-fg-2">{portalCallbackUrl(brand.slug)}</span>
-            <CopyButton value={portalCallbackUrl(brand.slug)} label={t("portalAuth.copy")} />
+                <span className="mono max-w-[300px] truncate text-[12px] text-fg-2">{portalCallbackUrl(brand.slug)}</span>
+                <CopyButton value={portalCallbackUrl(brand.slug)} label={t("portalAuth.copy")} />
               </Row>
             </>
           )}

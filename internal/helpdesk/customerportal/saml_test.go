@@ -72,6 +72,7 @@ type samlOpts struct {
 	tamper              func(xml string) string
 	status              string
 	noAudience          bool
+	nameIDFormat        string
 }
 
 func (p *samlIDP) response(t *testing.T, ws hdtest.WS, requestID string, o samlOpts) string {
@@ -107,13 +108,13 @@ func (p *samlIDP) response(t *testing.T, ws hdtest.WS, requestID string, o samlO
 	doc := fmt.Sprintf(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_r%d" Version="2.0" IssueInstant="%s" Destination="%s" InResponseTo="%s">`+
 		`<saml:Issuer>%s</saml:Issuer><samlp:Status><samlp:StatusCode Value="%s"/></samlp:Status>`+
 		`<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="%s" Version="2.0" IssueInstant="%s"><saml:Issuer>%s</saml:Issuer>`+
-		`<saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent">%s</saml:NameID>`+
+		`<saml:Subject><saml:NameID Format="%s">%s</saml:NameID>`+
 		`<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData NotOnOrAfter="%s" Recipient="%s" InResponseTo="%s"/></saml:SubjectConfirmation></saml:Subject>`+
 		`<saml:Conditions NotBefore="%s" NotOnOrAfter="%s">%s</saml:Conditions>`+
 		`<saml:AuthnStatement AuthnInstant="%s"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement>`+
 		`<saml:AttributeStatement>%s</saml:AttributeStatement></saml:Assertion></samlp:Response>`,
 		time.Now().UnixNano(), now.Format(time.RFC3339), acs, irt, or(o.issuer, samlEntity), status,
-		aid, now.Format(time.RFC3339), or(o.issuer, samlEntity), or(o.nameID, "name-id-1"), na, or(o.recipient, acs), irt,
+		aid, now.Format(time.RFC3339), or(o.issuer, samlEntity), or(o.nameIDFormat, "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"), or(o.nameID, "name-id-1"), na, or(o.recipient, acs), irt,
 		nb, na, audience, now.Format(time.RFC3339), attrs)
 
 	d := etree.NewDocument()
@@ -270,6 +271,7 @@ func TestSAMLRefusals(t *testing.T) {
 	refused("no audience at all", samlOpts{noAudience: true}, "provider_error", nil)
 	refused("expired", samlOpts{notAfter: -2 * time.Minute, notBefore: -10 * time.Minute}, "provider_error", nil)
 	refused("not yet valid", samlOpts{notBefore: 10 * time.Minute}, "provider_error", nil)
+	refused("a transient name id", samlOpts{nameIDFormat: "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"}, "transient_name_id", nil)
 	refused("another request's answer", samlOpts{inResponseTo: "_someone-elses-request"}, "provider_error", nil)
 	refused("another recipient", samlOpts{recipient: "https://evil.example.test/acs"}, "provider_error", nil)
 	refused("a failure status", samlOpts{status: "urn:oasis:names:tc:SAML:2.0:status:AuthnFailed"}, "provider_error", nil)
@@ -288,6 +290,16 @@ func TestSAMLRefusals(t *testing.T) {
 	if n := count(e, `SELECT count(*) FROM customer_sessions WHERE contact_id=$1`, cid); n != 1 {
 		t.Fatalf("%d sessions", n)
 	}
+}
+
+// A provider whose clock runs a little ahead of ours signs with a NotBefore in our future.
+func TestSAMLClockSkew(t *testing.T) {
+	e, ws, _, email := portalEnv(t)
+	p := newSAMLIDP(t)
+	useSAML(t, e, ws, p, "oidc", false)
+	// The response builder starts NotBefore a minute ago; these move it 30 seconds and 5 minutes ahead.
+	samlSignIn(t, e, ws, p, samlOpts{nameID: "s-skew", email: email, notBefore: 90 * time.Second}, nil).mustSucceed(t, ws)
+	samlSignIn(t, e, ws, p, samlOpts{nameID: "s-skew", email: email, notBefore: 6 * time.Minute}, nil).mustFail(t, "provider_error")
 }
 
 func TestSAMLBrandSettings(t *testing.T) {

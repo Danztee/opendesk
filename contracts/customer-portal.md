@@ -148,8 +148,8 @@ also gives the two values to enter at the provider: `saml.sp_entity_id`
 metadata as `application/samlmetadata+xml`.
 
 Sign-in is **SP-initiated Web SSO**. `GET .../portal/sso/start` (the same route as OIDC; the brand's
-protocol picks the flow) redirects to `idp_sso_url` with an unsigned `AuthnRequest` (HTTP-Redirect)
-and `RelayState`, and sets a cookie holding a signed `oauth_state` token (`flow: customer_portal_saml`:
+protocol picks the flow) redirects to `idp_sso_url` with an unsigned `AuthnRequest` (HTTP-Redirect; its `NameIDPolicy`
+asks for the `persistent` format) and `RelayState`, and sets a cookie holding a signed `oauth_state` token (`flow: customer_portal_saml`:
 brand, the request id, the relay value, the return path) for 10 minutes. The provider POSTs
 `SAMLResponse` and `RelayState` to `POST .../portal/sso/saml/acs`; the cookie is `SameSite=None` on
 https because that post comes from another site. An assertion started at the provider (no request, no
@@ -161,9 +161,14 @@ cookie) is refused: there is no IdP-initiated sign-in. A response is accepted on
    read, against signature wrapping) and the certificate is valid at that time;
 3. the status is Success and the response and assertion issuers are `idp_entity_id`;
 4. the assertion's bearer confirmation names this ACS URL as recipient, answers the request
-   (`InResponseTo`) and has not expired; its conditions are current and its audience is the
-   service provider's entity id;
-5. its assertion id has not been used: ids are kept until a minute after the assertion expires
+   (`InResponseTo`) and has not expired (`NotOnOrAfter` against our clock, no allowance); its
+   audience is the service provider's entity id; its conditions are current: `NotOnOrAfter` is held
+   to our clock exactly, while `NotBefore` may be up to two minutes ahead of it, because providers
+   set it to the instant they sign and a slightly fast provider clock must not refuse a fresh
+   assertion;
+5. its NameID is not `urn:oasis:names:tc:SAML:2.0:nameid-format:transient`: a transient id changes
+   at every sign-in, so it cannot be a lasting link, and such a response is `transient_name_id`;
+6. its assertion id has not been used: ids are kept until two minutes after the assertion expires
    (`customer_saml_assertions`), so a captured response signs no one in twice.
 
 Who it vouches for: the NameID is the subject, and the link key is `saml:<idp_entity_id>` with it, in
@@ -175,8 +180,9 @@ address (there is no `email_verified`): a brand trusts its provider for its cust
 name is `name_attribute` or `name`, `displayName` and the like. The session has `method = 'saml'`; it
 needs its brand to still have a SAML provider, so switching the brand to `local` or to OIDC ends it at the
 next refresh. A failure is `?sso_error={code}` as in OIDC: `invalid_state` (cookie, relay value or a
-reused assertion), `invalid_request`, `provider_error` (anything about the response), `provider_unavailable`
-(unusable configuration), then the matching errors.
+reused assertion), `invalid_request`, `provider_error` (anything about the response), `transient_name_id` (the provider sent a transient
+NameID; it must send a persistent one, or another id that stays the same for the customer),
+`provider_unavailable` (unusable configuration), then the matching errors.
 
 ## Starting a request
 

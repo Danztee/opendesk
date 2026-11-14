@@ -35,6 +35,16 @@ const samlFlow = "customer_portal_saml"
 // samlMaxResponse bounds the form a provider posts.
 const samlMaxResponse = 1 << 20
 
+// samlClockSkew is how far ahead of ours a provider's clock may run: providers set NotBefore to
+// the instant they sign, so a slightly fast clock would otherwise refuse every fresh assertion.
+// NotOnOrAfter, of the conditions and of the bearer confirmation, is held to our clock exactly.
+const samlClockSkew = 2 * time.Minute
+
+const (
+	samlNameIDPersistent = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"
+	samlNameIDTransient  = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+)
+
 // samlBrand is a brand's SAML provider.
 type samlBrand struct {
 	EntityID       string
@@ -97,7 +107,7 @@ func (s *service) samlProvider(slug string, b ssoBrand) (*saml2.SAMLServiceProvi
 		AudienceURI:                 s.samlEntityID(slug),
 		AssertionConsumerServiceURL: s.samlACSURL(slug),
 		IDPCertificateStore:         store,
-		NameIdFormat:                "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
+		NameIdFormat:                samlNameIDPersistent,
 		AllowMissingAttributes:      true,
 		Clock:                       dsig.NewRealClock(),
 	}, nil
@@ -230,8 +240,9 @@ func (s *service) samlIdentity(ctx context.Context, hc kb.HelpCenter, b ssoBrand
 		s.d.Log.Warn("portal saml response refused", "brand", hc.BrandID)
 		return out, "provider_error"
 	}
-	if info.WarningInfo == nil || info.WarningInfo.InvalidTime || info.WarningInfo.NotInAudience {
-		s.d.Log.Warn("portal saml assertion not current or not for this service", "brand", hc.BrandID)
+	// The library's time warning allows no clock skew; the conditions' times are judged below.
+	if info.WarningInfo == nil || info.WarningInfo.NotInAudience {
+		s.d.Log.Warn("portal saml assertion not for this service", "brand", hc.BrandID)
 		return out, "provider_error"
 	}
 	a := info.Assertions[0]
@@ -248,8 +259,21 @@ func (s *service) samlIdentity(ctx context.Context, hc kb.HelpCenter, b ssoBrand
 	if info.NameID == "" || len(info.NameID) > 500 {
 		return out, "provider_error"
 	}
+	// A transient NameID changes at every sign-in, so it cannot be the customer's link.
+	if sub.NameID != nil && strings.TrimSpace(sub.NameID.Format) == samlNameIDTransient {
+		s.d.Log.Warn("portal saml transient name id", "brand", hc.BrandID)
+		return out, "transient_name_id"
+	}
+	notBefore, err := time.Parse(time.RFC3339, a.Conditions.NotBefore)
+	if err != nil {
+		return out, "provider_error"
+	}
 	until, err := time.Parse(time.RFC3339, a.Conditions.NotOnOrAfter)
 	if err != nil {
+		return out, "provider_error"
+	}
+	if now := time.Now(); now.Before(notBefore.Add(-samlClockSkew)) || !now.Before(until) {
+		s.d.Log.Warn("portal saml assertion not current", "brand", hc.BrandID)
 		return out, "provider_error"
 	}
 	// Each assertion signs one customer in once.
@@ -257,7 +281,7 @@ func (s *service) samlIdentity(ctx context.Context, hc kb.HelpCenter, b ssoBrand
 	err = s.d.DB.Pool.QueryRow(ctx, `WITH gone AS (DELETE FROM customer_saml_assertions WHERE expires_at < now()),
         ins AS (INSERT INTO customer_saml_assertions (workspace_id, assertion_id, expires_at) VALUES ($1,$2,$3)
         ON CONFLICT DO NOTHING RETURNING 1) SELECT EXISTS (SELECT 1 FROM ins)`,
-		hc.WorkspaceID, a.ID, until.Add(time.Minute)).Scan(&fresh)
+		hc.WorkspaceID, a.ID, until.Add(samlClockSkew)).Scan(&fresh)
 	if err != nil {
 		s.d.Log.Error("portal saml replay record", "brand", hc.BrandID, "err", err)
 		return out, "server_error"
