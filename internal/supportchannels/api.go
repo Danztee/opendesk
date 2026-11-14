@@ -958,7 +958,15 @@ const connectionSelect = `SELECT id,workspace_id,provider,name,external_account_
 func connectionScan(c *connection) []any {
 	return []any{&c.ID, &c.WorkspaceID, &c.Provider, &c.Name, &c.ExternalAccountID, &c.ExternalAccountName, &c.ExternalAccountHandle, &c.CredentialsEnc, &c.Status, &c.LastError, &c.HealthStatus, &c.HealthDetail, &c.HealthCheckedAt, &c.HealthUnhealthySince, &c.HealthAlertedAt, &c.CredentialsUpdatedAt, &c.CreatedAt}
 }
+
+// credentials are the connection's stored credentials, with its webhook address as webhook_url:
+// never stored, but an adapter whose messages carry the address (Mattermost's buttons) needs it
+// wherever it posts, and Google Chat checks its signed requests against it.
 func (s *Service) credentials(c connection) (map[string]string, error) {
 	out := map[string]string{}
-	return out, s.d.Box.OpenJSON(c.CredentialsEnc, &out)
+	if err := s.d.Box.OpenJSON(c.CredentialsEnc, &out); err != nil {
+		return out, err
+	}
+	out["webhook_url"] = s.webhookURL(c)
+	return out, nil
 }
