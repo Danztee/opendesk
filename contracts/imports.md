@@ -330,7 +330,10 @@ the directory in a background job (River, `contacts.import`) that checkpoints af
 100 rows and resumes after a restart. An agent can start one (`contacts:write`); it never touches
 tickets. Everything it writes goes through the routes' own create and update paths
 (`insertContact`, `patchContact`), so validation, labels, custom fields, events and the audit log
-are the ones of a person added by hand.
+are the ones of a person added by hand. It works with the role its starter has in the workspace
+when each run begins (an API key's import as an agent); one whose starter is no longer an agent or
+above there fails. The audit log names the starter while their account exists, and no one for an
+API key's import.
 
 | method | path | body → response |
 | --- | --- | --- |
@@ -342,16 +345,20 @@ are the ones of a person added by hand.
 
 `mapping` names the column of each field: `email`, `name`, `phone`, `company`, `external_id`,
 `notes`, `labels`, and `fields` (a custom field's key to its column). A name or an email is
-needed. `company` is found by name, case-insensitively, and created when there is none; `labels`
+needed. `company` is cleaned as a company typed by hand (trimmed, spaces collapsed, `<` and `>`
+refused), then found by that name, case-insensitively, and created when there is none; `labels`
 split on commas, semicolons or bars and are created where the person may create labels
 (`hd.CanCreateLabels`). Custom field cells are read by the field's type (numbers, yes or no,
-select options by label or id); a cell that does not fit fails its row.
+select options by label or id); a cell that does not fit fails its row. A cell that starts with
+`'` followed by `=`, `+`, `-`, `@`, tab or return is read without the `'`, so an export imports back
+as it was.
 
 `match_on` is `email` (a primary or an extra address, case-insensitively) or `external_id`, and
 needs its column mapped. `on_match` says what happens to someone already there: `skip` leaves them
 alone, `fill` sets only what they have empty (labels are always added), `overwrite` sets every
-value the file has (an empty cell changes nothing). A row without the value it is matched by has
-nothing to match and is added.
+value the file has (an empty cell changes nothing). A person found by email keeps their addresses
+as they are: the one they were found by is never moved to the primary. A row without the value it
+is matched by has nothing to match and is added.
 
 `ContactImport`: `{id, filename, status: running | done | failed | cancelled, match_on, on_match,
 total, processed, created, updated, skipped, failed, errors: [{line, message}], error, created_at,

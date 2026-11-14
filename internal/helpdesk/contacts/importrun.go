@@ -62,6 +62,9 @@ type importRun struct {
 	Skipped, Failed       int
 	Errors                []ContactImportRowError
 	status, key, filename string
+	// role is the starter's role in the workspace when this run began; an import started
+	// with an API key works as an agent.
+	role auth.Role
 }
 
 func loadRun(ctx context.Context, d *deps.Deps, id uuid.UUID) (*importRun, error) {
@@ -81,14 +84,50 @@ func loadRun(ctx context.Context, d *deps.Deps, id uuid.UUID) (*importRun, error
 	return r, nil
 }
 
-// principal is the person who started the import, acting as an agent: the import adds what
-// an agent could add by hand, and labels follow what that person may create.
+// principal is the person who started the import, with their role in the workspace: the
+// import adds what they could add by hand, and labels follow what they may create.
 func (r *importRun) principal() *auth.Principal {
-	p := &auth.Principal{Kind: auth.KindUser, WorkspaceID: r.WorkspaceID, Role: auth.RoleAgent}
+	p := &auth.Principal{Kind: auth.KindUser, WorkspaceID: r.WorkspaceID, Role: r.role}
 	if r.CreatedBy != nil {
 		p.UserID = *r.CreatedBy
 	}
 	return p
+}
+
+// loadRole reads the starter's current role. It answers false when they are no longer an
+// agent or above in the workspace, so the import stops.
+func (r *importRun) loadRole(ctx context.Context, d *deps.Deps) (bool, error) {
+	r.role = auth.RoleAgent
+	if r.CreatedBy == nil {
+		return true, nil
+	}
+	var role string
+	err := d.DB.Pool.QueryRow(ctx, `SELECT role FROM members WHERE workspace_id = $1 AND user_id = $2`, r.WorkspaceID, *r.CreatedBy).Scan(&role)
+	if db.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	r.role = auth.Role(role)
+	return r.role.AtLeast(auth.RoleAgent), nil
+}
+
+// actor is who the audit log names for the import: its starter while their account exists,
+// otherwise no one (an API key's import, or a starter deleted since).
+func (r *importRun) actor(ctx context.Context, tx pgx.Tx) (*auth.Principal, error) {
+	if r.CreatedBy == nil {
+		return nil, nil
+	}
+	var id uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT id FROM users WHERE id = $1 FOR KEY SHARE`, *r.CreatedBy).Scan(&id)
+	if db.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r.principal(), nil
 }
 
 func runImport(ctx context.Context, d *deps.Deps, id uuid.UUID) error {
@@ -102,6 +141,11 @@ func runImport(ctx context.Context, d *deps.Deps, id uuid.UUID) error {
 	if r.status != statusRunning {
 		discardUpload(ctx, d, r)
 		return nil
+	}
+	if ok, err := r.loadRole(ctx, d); err != nil {
+		return err
+	} else if !ok {
+		return finish(ctx, d, r, statusFailed, "The person who started this import can no longer add people.")
 	}
 	if r.key == "" {
 		return finish(ctx, d, r, statusFailed, "The uploaded file is gone. Upload it again in a new import.")
@@ -170,7 +214,11 @@ func finish(ctx context.Context, d *deps.Deps, r *importRun, status, msg string)
 			return err
 		}
 		meta := map[string]any{"created": x.Created, "updated": x.Updated, "skipped": x.Skipped, "failed": x.Failed}
-		if err := audit.Log(ctx, tx, r.principal(), r.WorkspaceID, "contact.import_"+status, "contact_import", &r.ImportID, meta); err != nil {
+		actor, err := r.actor(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if err := audit.Log(ctx, tx, actor, r.WorkspaceID, "contact.import_"+status, "contact_import", &r.ImportID, meta); err != nil {
 			return err
 		}
 		return publishImport(ctx, tx, r.WorkspaceID, r.CreatedBy, x)
@@ -271,7 +319,13 @@ func (r *importRun) cell(rec []string, cols map[string]int, col string) string {
 	if !ok || i >= len(rec) {
 		return ""
 	}
-	return strings.TrimSpace(rec[i])
+	s := rec[i]
+	// An export guards cells that a spreadsheet would run as a formula with a leading
+	// quote (csvCell); reading one back drops it.
+	if len(s) > 1 && s[0] == '\'' && strings.ContainsRune("=+-@\t\r", rune(s[1])) {
+		s = s[1:]
+	}
+	return strings.TrimSpace(s)
 }
 
 // row adds or updates the person one row describes and says which it did.
@@ -325,6 +379,10 @@ func (r *importRun) row(ctx context.Context, d *deps.Deps, tx pgx.Tx, p *auth.Pr
 	}
 	if err != nil {
 		return "", err
+	}
+	if id != nil && r.MatchOn == matchEmail {
+		// The person already has this address, perhaps as an extra one: it stays where it is.
+		body.Email = Nullable[string]{}
 	}
 	company := r.cell(rec, cols, m.Company)
 	if id == nil {
@@ -409,10 +467,16 @@ func findByExternalID(ctx context.Context, tx pgx.Tx, wid uuid.UUID, ext string)
 
 // setCompany points the body at the company called name, creating it when there is none.
 func setCompany(ctx context.Context, tx pgx.Tx, p *auth.Principal, b *contactWriteBody, name string) error {
-	name = strings.TrimSpace(name)
-	if len(name) > 200 {
-		return httpx.Validation("Company names can be at most 200 characters.")
+	// The same rules as a company created by hand.
+	row := companyRow{}
+	if err := (&companyWriteBody{Name: &name}).apply(&row); err != nil {
+		var he *httpx.Error
+		if errors.As(err, &he) {
+			return httpx.Validation("company " + he.Detail)
+		}
+		return err
 	}
+	name = row.Name
 	var id uuid.UUID
 	err := tx.QueryRow(ctx, `SELECT id FROM companies WHERE workspace_id = $1 AND lower(name) = lower($2)`, p.WorkspaceID, name).Scan(&id)
 	if db.IsNotFound(err) {
