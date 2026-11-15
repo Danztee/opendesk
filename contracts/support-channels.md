@@ -254,22 +254,26 @@ generates.
 - People talk to the bot in the thread over the bot's **websocket** (`channel.Subscriber`,
   `/api/v4/websocket`, authenticated with the bot's token): `posted` events of the connection's
   team, never the bot's own, another bot's or a webhook's, a system post or a direct message. A post
-  that mentions the bot is `Directed`; one that starts with `!reply`, `!note`, `!assign`, `!status`,
-  `!priority` or `!link` is that command (Mattermost keeps `/` for its slash commands), anything
-  else is `chat` for Ollie. Files on a post are read with `GET /files/{id}/info` and opened with
-  `GET /files/{id}` (`AttachmentDownloader`). A refused token ends the subscription with a
+  that starts with `!reply`, `!note`, `!assign`, `!status`, `!priority` or `!link` is that command
+  (Mattermost keeps `/` for its slash commands); one that mentions the bot is `Directed`, and what
+  it says is `chat` for Ollie. Any other post is people talking among themselves and is ignored, as
+  in Slack and Discord. Files on a post that reaches opendesk are read with `GET /files/{id}/info`
+  and opened with `GET /files/{id}` (`AttachmentDownloader`). A refused token ends the subscription with a
   `channel.FatalError`; a dropped connection is retried by the engine, and a connection that stops
   answering pings is dropped.
 - Buttons and selects post to the connection's webhook URL: opendesk writes it, and the button token,
   into every message's `integration`, so nothing is registered in Mattermost. Mattermost signs
   nothing, so `Verify` accepts a press only when `context.token` equals the connection's
   `webhook_token` (constant time). The engine hands every adapter the connection's webhook address as
-  `webhook_url` in its credentials (never stored). A press names its thread in `context.thread`;
+  `webhook_url` in its credentials (never stored) wherever it posts or verifies, and a button
+  without it is refused rather than posted. A press names its thread in `context.thread`;
   the ticket's own card is the thread's first post, so its `post_id` is the thread.
 - `Respond` posts an ephemeral message only the person sees (`POST /posts/ephemeral`);
   `ClearActions` removes the buttons of a consumed confirmation; `RichAdapter` posts, edits and
   deletes mirrored messages (4,000 characters, then "View in opendesk"). A customer's `@name` is
-  written with a zero-width space after the `@`, so mirrored text never notifies anyone.
+  written with a zero-width space after the `@` wherever it stands outside a word (after markdown
+  or punctuation too, and in attachment names), so mirrored text never notifies anyone; an email
+  address is left alone.
 - Health is `healthy` when the token works and the bot is a member of the team,
   `action_required` when it is not, `error` when the token is refused. `Configure` registers nothing
   and checks the same. A `429` waits for `X-Ratelimit-Reset`.

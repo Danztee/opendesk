@@ -314,7 +314,10 @@ func (Adapter) Parse(_ http.Header, body []byte) (channel.WebhookResult, error) 
 	return ack, nil
 }
 
-var mentionRe = regexp.MustCompile(`(^|[\s(])@([A-Za-z0-9._-]+)`)
+// mentionRe is an @name Mattermost would notify: an @ not inside a word, so markdown
+// (**@all**, [@here]) and punctuation (hi,@channel, hi.@here) count. Mattermost splits words on
+// that punctuation too; a letter, digit or _ before the @ (an email address) is left alone.
+var mentionRe = regexp.MustCompile(`(^|[^A-Za-z0-9_])@([A-Za-z0-9._-]+)`)
 
 // quiet stops a customer's words from notifying anyone: Mattermost has no switch for
 // it, so every @name gets a zero-width space after its @ (an email address is left alone).
@@ -347,7 +350,11 @@ func (a Adapter) send(ctx context.Context, c *http.Client, cr map[string]string,
 }
 
 func (a Adapter) CreateThread(ctx context.Context, c *http.Client, cr map[string]string, destination string, t channel.Ticket) (channel.Thread, error) {
-	root, err := a.send(ctx, c, cr, post{ChannelID: destination, Message: fmt.Sprintf("**#%d %s**", t.Number, clip(quiet(t.Subject), 200)), Props: ticketProps(cr, t)})
+	props, err := ticketProps(cr, t)
+	if err != nil {
+		return channel.Thread{}, err
+	}
+	root, err := a.send(ctx, c, cr, post{ChannelID: destination, Message: fmt.Sprintf("**#%d %s**", t.Number, clip(quiet(t.Subject), 200)), Props: props})
 	if err != nil {
 		return channel.Thread{}, err
 	}
@@ -361,8 +368,12 @@ func (a Adapter) Post(ctx context.Context, c *http.Client, cr map[string]string,
 
 // Update refreshes the ticket's card, the thread's first post.
 func (a Adapter) Update(ctx context.Context, c *http.Client, cr map[string]string, root string, t channel.Ticket) error {
+	props, err := ticketProps(cr, t)
+	if err != nil {
+		return err
+	}
 	return a.call(ctx, c, cr, http.MethodPut, "/posts/"+url.PathEscape(root)+"/patch",
-		map[string]any{"message": fmt.Sprintf("**#%d %s**", t.Number, clip(quiet(t.Subject), 200)), "props": ticketProps(cr, t)}, nil)
+		map[string]any{"message": fmt.Sprintf("**#%d %s**", t.Number, clip(quiet(t.Subject), 200)), "props": props}, nil)
 }
 
 func (a Adapter) PostInteractive(ctx context.Context, c *http.Client, cr map[string]string, thread string, message channel.Message) (channel.MessageRef, error) {
@@ -377,8 +388,11 @@ func (a Adapter) PostInteractive(ctx context.Context, c *http.Client, cr map[str
 			case "danger":
 				style = "danger"
 			}
-			actions = append(actions, map[string]any{"id": "od" + strings.NewReplacer("_", "", "-", "").Replace(action.Command), "name": action.Label, "style": style,
-				"integration": integration(cr, action.Command, action.Value, thread)})
+			to, err := integration(cr, action.Command, action.Value, thread)
+			if err != nil {
+				return channel.MessageRef{}, err
+			}
+			actions = append(actions, map[string]any{"id": "od" + strings.NewReplacer("_", "", "-", "").Replace(action.Command), "name": action.Label, "style": style, "integration": to})
 		}
 		p.Props = map[string]any{"attachments": []any{map[string]any{"actions": actions}}}
 	}
@@ -429,9 +443,10 @@ func richText(m channel.RichMessage) string {
 		view = "\n[View in opendesk](" + m.ViewURL + ")"
 	}
 	for i, f := range m.Attachments {
-		line := fmt.Sprintf("\n[%s](%s) · %d bytes", strings.NewReplacer("[", "(", "]", ")").Replace(f.Name), f.URL, f.SizeBytes)
+		name := quiet(strings.NewReplacer("[", "(", "]", ")").Replace(f.Name))
+		line := fmt.Sprintf("\n[%s](%s) · %d bytes", name, f.URL, f.SizeBytes)
 		if f.Preview {
-			line = fmt.Sprintf("\n![%s](%s)", strings.NewReplacer("[", "(", "]", ")").Replace(f.Name), f.URL)
+			line = fmt.Sprintf("\n![%s](%s)", name, f.URL)
 		}
 		if len([]rune(text+line+view)) > 3900 {
 			text += fmt.Sprintf("\n%d more attachment(s)", len(m.Attachments)-i)
@@ -465,8 +480,11 @@ func (a Adapter) DownloadAttachment(ctx context.Context, c *http.Client, cr map[
 }
 
 // integration is where a button posts: opendesk's webhook, with the button token and
-// what the press means in its context.
-func integration(cr map[string]string, command, value, thread string) map[string]any {
+// what the press means in its context. A button without the address would post nowhere.
+func integration(cr map[string]string, command, value, thread string) (map[string]any, error) {
+	if cr["webhook_url"] == "" {
+		return nil, errors.New("mattermost: the connection's webhook address is missing")
+	}
 	ctx := map[string]any{"action": command, "token": cr["webhook_token"]}
 	if value != "" {
 		ctx["value"] = value
@@ -474,7 +492,7 @@ func integration(cr map[string]string, command, value, thread string) map[string
 	if thread != "" {
 		ctx["thread"] = thread
 	}
-	return map[string]any{"url": cr["webhook_url"], "context": ctx}
+	return map[string]any{"url": cr["webhook_url"], "context": ctx}, nil
 }
 
 var (
@@ -482,16 +500,22 @@ var (
 	priorities = []string{"low", "normal", "high", "urgent"}
 )
 
-func selectAction(cr map[string]string, id, name, command string, values []string) map[string]any {
+func selectAction(to map[string]any, id, name string, values []string) map[string]any {
 	options := make([]any, 0, len(values))
 	for _, v := range values {
 		options = append(options, map[string]any{"text": strings.ReplaceAll(v, "_", " "), "value": v})
 	}
-	return map[string]any{"id": id, "name": name, "type": "select", "options": options, "integration": integration(cr, command, "", "")}
+	return map[string]any{"id": id, "name": name, "type": "select", "options": options, "integration": to}
 }
 
 // ticketProps is the ticket's card: a message attachment with its facts and controls.
-func ticketProps(cr map[string]string, t channel.Ticket) map[string]any {
+func ticketProps(cr map[string]string, t channel.Ticket) (map[string]any, error) {
+	assign, err := integration(cr, "assign_self", "", "")
+	if err != nil {
+		return nil, err
+	}
+	status, _ := integration(cr, "status", "", "")
+	priority, _ := integration(cr, "priority", "", "")
 	return map[string]any{"attachments": []any{map[string]any{
 		"title": fmt.Sprintf("#%d %s", t.Number, clip(quiet(t.Subject), 200)), "title_link": t.URL,
 		"fields": []any{
@@ -501,9 +525,9 @@ func ticketProps(cr map[string]string, t channel.Ticket) map[string]any {
 			map[string]any{"title": "Priority", "value": t.Priority, "short": true},
 		},
 		"actions": []any{
-			map[string]any{"id": "odassign", "name": "Assign to me", "style": "primary", "integration": integration(cr, "assign_self", "", "")},
-			selectAction(cr, "odstatus", "Status", "status", statuses),
-			selectAction(cr, "odpriority", "Priority", "priority", priorities),
+			map[string]any{"id": "odassign", "name": "Assign to me", "style": "primary", "integration": assign},
+			selectAction(status, "odstatus", "Status", statuses),
+			selectAction(priority, "odpriority", "Priority", priorities),
 		},
-	}}}
+	}}}, nil
 }

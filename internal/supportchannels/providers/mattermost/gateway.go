@@ -174,6 +174,9 @@ func (a Adapter) inbound(ctx context.Context, c *http.Client, cr map[string]stri
 			cmd, text = strings.ToLower(word), strings.TrimSpace(tail)
 		}
 	}
+	if cmd == "chat" && !directed {
+		return channel.Inbound{}, false // people talking among themselves in the thread
+	}
 	thread := p.RootID
 	if thread == "" {
 		thread = p.ID // a new conversation starts at the post that opened it

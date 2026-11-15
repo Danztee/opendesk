@@ -282,7 +282,9 @@ func TestSubscribeDeliversPostsToTheBot(t *testing.T) {
 		postedEvent(post(map[string]any{"id": "m3", "user_id": "u1", "channel_id": "c1", "message": "a system join", "type": "system_join_channel"}), "[]", "O"),
 		postedEvent(post(map[string]any{"id": "m4", "user_id": "u2", "channel_id": "c1", "message": "a dm"}), "[]", "D"),
 		postedEvent(post(map[string]any{"id": "m5", "user_id": "u3", "channel_id": "c1", "message": "another bot", "props": map[string]any{"from_bot": "true"}}), "[]", "O"),
-		postedEvent(post(map[string]any{"id": "m6", "user_id": "u1", "channel_id": "c1", "root_id": "root1", "message": "!bogus nothing", "file_ids": []string{"f1"}}), "[]", "O"),
+		postedEvent(post(map[string]any{"id": "m6", "user_id": "u1", "channel_id": "c1", "root_id": "root1", "message": "@ada can you look at this?", "file_ids": []string{"f2"}}), `["u2"]`, "O"),
+		postedEvent(post(map[string]any{"id": "m7", "user_id": "u1", "channel_id": "c1", "root_id": "root1", "message": "!bogus nothing"}), "[]", "O"),
+		postedEvent(post(map[string]any{"id": "m8", "user_id": "u1", "channel_id": "c1", "root_id": "root1", "message": "@opendesk !bogus nothing", "file_ids": []string{"f1"}}), `["bot1"]`, "O"),
 	}
 	got := make(chan channel.Inbound, 10)
 	connected := make(chan struct{}, 1)
@@ -323,8 +325,15 @@ func TestSubscribeDeliversPostsToTheBot(t *testing.T) {
 	if a2.Command != "chat" || a2.Text != "what is this?" || !a2.Directed || a2.ExternalThreadID != "m2" {
 		t.Fatalf("a mention: %+v", a2)
 	}
-	if a3.EventID != "m6" || a3.Command != "chat" || a3.Text != "!bogus nothing" || len(a3.Files) != 1 || a3.Files[0] != (channel.Attachment{ID: "f1", Name: "screen.png", ContentType: "image/png", SizeBytes: 2048}) {
-		t.Fatalf("an unknown ! word is chat, with its file: %+v", a3)
+	if a3.EventID != "m8" || a3.Command != "chat" || a3.Text != "!bogus nothing" || !a3.Directed || len(a3.Files) != 1 || a3.Files[0] != (channel.Attachment{ID: "f1", Name: "screen.png", ContentType: "image/png", SizeBytes: 2048}) {
+		t.Fatalf("an unknown ! word said to the bot is chat, with its file: %+v", a3)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, call := range f.calls {
+		if strings.Contains(call, "/files/f2") {
+			t.Fatalf("a post not said to the bot had its files looked up: %v", f.calls)
+		}
 	}
 }
 
@@ -360,3 +369,45 @@ func TestRateLimit(t *testing.T) {
 }
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
+
+func TestQuietStopsEveryMention(t *testing.T) {
+	for _, s := range []string{"@channel", "**@all**", "[@here]", "hi,@channel", "hi.@channel", "+@all", "x-@here", "(@here)", "say:@all", "`@ada`"} {
+		got := quiet(s)
+		if strings.Contains(got, "@channel") || strings.Contains(got, "@all") || strings.Contains(got, "@here") || strings.Contains(got, "@ada") {
+			t.Errorf("quiet(%q) = %q still notifies", s, got)
+		}
+	}
+	for _, s := range []string{"ada@example.com", "ada.lovelace+support@example.co.uk", "a_b%c@x.io"} {
+		if got := quiet(s); got != s {
+			t.Errorf("quiet(%q) = %q changed an email address", s, got)
+		}
+	}
+	text := richText(channel.RichMessage{Text: "see file", Attachments: []channel.Attachment{
+		{Name: "@channel.pdf", URL: "https://app.test/a/1", SizeBytes: 3},
+		{Name: "[@here].png", URL: "https://app.test/a/2", Preview: true},
+	}})
+	if strings.Contains(text, "@channel") || strings.Contains(text, "@here") {
+		t.Fatalf("an attachment name notifies: %q", text)
+	}
+}
+
+func TestButtonsNeedTheWebhookAddress(t *testing.T) {
+	a, f, cr := setup(t)
+	delete(cr, "webhook_url")
+	ctx := context.Background()
+	if _, err := a.CreateThread(ctx, http.DefaultClient, cr, "c1", channel.Ticket{Number: 1, Subject: "x"}); err == nil {
+		t.Fatal("a card was posted with buttons that post nowhere")
+	}
+	if err := a.Update(ctx, http.DefaultClient, cr, "post1", channel.Ticket{Number: 1, Subject: "x"}); err == nil {
+		t.Fatal("a card was updated with buttons that post nowhere")
+	}
+	if _, err := a.PostInteractive(ctx, http.DefaultClient, cr, "post1", channel.Message{Text: "Send?", Actions: []channel.Action{{Command: "confirm", Label: "Send"}}}); err == nil {
+		t.Fatal("a confirmation was posted with buttons that post nowhere")
+	}
+	if len(f.posts) != 0 {
+		t.Fatalf("posted %v", f.posts)
+	}
+	if _, err := a.PostInteractive(ctx, http.DefaultClient, cr, "post1", channel.Message{Text: "No buttons"}); err != nil {
+		t.Fatalf("a message without buttons needs no address: %v", err)
+	}
+}
