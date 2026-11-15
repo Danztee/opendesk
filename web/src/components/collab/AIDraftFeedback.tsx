@@ -1,6 +1,7 @@
-// Feedback on a sent message that began as an AI draft (contracts/collab.md "AI draft
-// outcomes"): what was wrong with the draft and, optionally, a better answer. The key that
-// wrote the draft reads it back from its outcome feed; opendesk itself trains nothing.
+// Feedback on an AI draft (contracts/collab.md "AI draft outcomes"): on a sent message that
+// began as one, or on one a person discarded, replaced or abandoned. What was wrong with the
+// draft and, optionally, a better answer. The key that wrote the draft reads it back from
+// its outcome feed; opendesk itself trains nothing.
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MessageSquareText } from "lucide-react";
@@ -29,14 +30,33 @@ const textHtml = (text: string) =>
 /** The line under a sent message's header: which AI drafted it, and a way to say how it did. */
 export function AIDraftFeedback({ m }: { m: MailMessage }) {
   const { t } = useTranslation("collab");
-  const [open, setOpen] = useState(false);
   const d = m.ai_draft;
   if (!d || m.draft) return null;
   const how = d.outcome === "sent_unchanged" ? t("aiFeedback.asWritten") : d.outcome === "sent_edited" ? t("aiFeedback.edited") : "";
+  return <FeedbackLine draft={d} threadId={m.thread_id} how={how} />;
+}
+
+/**
+ * A conversation's AI draft that was not used (discarded, replaced or abandoned) and is
+ * gone: the same line, so feedback on it stays reachable (GH#437).
+ */
+export function UnusedAIDraft({ draft, threadId }: { draft: AIDraftRef; threadId: string }) {
+  const { t } = useTranslation("collab");
+  const how = draft.outcome === "discarded" ? t("aiFeedback.discarded") : draft.outcome === "replaced" ? t("aiFeedback.replaced") : t("aiFeedback.abandoned");
+  return (
+    <div className="flex min-h-7 items-center px-1 text-[11.5px]">
+      <FeedbackLine draft={draft} threadId={threadId} how={how} />
+    </div>
+  );
+}
+
+function FeedbackLine({ draft, threadId, how }: { draft: AIDraftRef; threadId: string; how: string }) {
+  const { t } = useTranslation("collab");
+  const [open, setOpen] = useState(false);
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 text-fg-4">
       <span data-text className="cursor-text select-text truncate">
-        {t("aiFeedback.from", { name: d.client })}
+        {t("aiFeedback.from", { name: draft.client })}
         {how && ` · ${how}`}
       </span>
       <button
@@ -45,24 +65,26 @@ export function AIDraftFeedback({ m }: { m: MailMessage }) {
         className="inline-flex shrink-0 items-center gap-1 rounded-sm px-1 text-fg-3 outline-none hover:bg-hover hover:text-fg focus-visible:shadow-[0_0_0_2px_var(--focus)]"
       >
         <MessageSquareText className="size-3" />
-        {d.has_feedback ? t("aiFeedback.edit") : t("aiFeedback.give")}
+        {draft.has_feedback ? t("aiFeedback.edit") : t("aiFeedback.give")}
       </button>
-      <AIDraftFeedbackDialog draft={d} threadId={m.thread_id} open={open} onOpenChange={setOpen} />
+      <AIDraftFeedbackDialog draft={draft} threadId={threadId} open={open} onOpenChange={setOpen} />
     </span>
   );
 }
 
-/** Feedback on one AI draft, sent or still waiting. Saving never changes the mail. */
+/** Feedback on one AI draft, sent, waiting or gone; `defaultReason` preselects a reason (a discard suggests "should not answer"). Saving never changes the mail. */
 export function AIDraftFeedbackDialog({
   draft,
   threadId,
   open,
   onOpenChange,
+  defaultReason,
 }: {
   draft: AIDraftRef;
   threadId: string;
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  defaultReason?: AIDraftFeedbackReason;
 }) {
   const { t, i18n } = useTranslation("collab");
   const qc = useQueryClient();
@@ -73,10 +95,10 @@ export function AIDraftFeedbackDialog({
   const full = note.length >= noteMax;
   useEffect(() => {
     if (!open) return;
-    setReason(undefined);
+    setReason(defaultReason);
     setNote("");
     setBetter("");
-  }, [open]);
+  }, [open, defaultReason]);
 
   const save = useMutation({
     mutationFn: (r: AIDraftFeedbackReason) =>
