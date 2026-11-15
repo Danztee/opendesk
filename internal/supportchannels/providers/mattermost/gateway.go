@@ -139,7 +139,8 @@ func (a Adapter) Subscribe(ctx context.Context, c *http.Client, cr map[string]st
 }
 
 // inbound reads one posted event as something said to the bot, or not at all: the bot's own
-// posts, other bots', system posts, other teams' and direct messages are left out.
+// posts, other bots', system posts, other teams', direct messages and posts that neither mention
+// the bot nor start with a command are left out.
 func (a Adapter) inbound(ctx context.Context, c *http.Client, cr map[string]string, me user, ev socketEvent) (channel.Inbound, bool) {
 	var p socketPost
 	if json.Unmarshal([]byte(ev.Data.Post), &p) != nil || p.ID == "" || p.UserID == "" {
