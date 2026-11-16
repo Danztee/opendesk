@@ -122,8 +122,16 @@ func (c *Context) RenderEmail(d Design, p Parts) Email {
 	} else {
 		body = simpleBody(o, c, accent, font, p, footer, historyHTML)
 	}
+	// The plain style reads like a person's own email, so it sets no colours or card of its own and
+	// the reader's mail app may show it in its dark theme; the branded card and a custom layout
+	// are designed on white and stay light.
+	plain := !custom && o.Style != "branded"
+	scheme := `<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light">`
+	if plain {
+		scheme = `<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark">`
+	}
 	doc := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
-		`<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light"><style>` + baseCSS(accent, font) + `</style></head>` +
+		scheme + `<style>` + baseCSS(accent, font, plain) + `</style></head>` +
 		`<body style="margin:0;padding:0;-webkit-text-size-adjust:100%">` + body + `</body></html>`
 
 	var text strings.Builder
@@ -157,18 +165,23 @@ func (c *Context) fillWithSlots(src string, slots map[string]string) string {
 	return out
 }
 
-func baseCSS(accent, font string) string {
+func baseCSS(accent, font string, plain bool) string {
+	ink, quote, soft, rule := "color:#171717", "color:#525252", "#F5F5F5", "#E5E5E5"
+	if plain {
+		// Nothing fixed to light: text takes the reader's colour, tints are see-through greys.
+		ink, quote, soft, rule = "", "opacity:.8", "rgba(127,127,127,.18)", "rgba(127,127,127,.4)"
+	}
 	return `body{margin:0;padding:0}` +
-		`.od-body{font-family:` + font + `;font-size:14px;line-height:1.6;color:#171717}` +
+		`.od-body{font-family:` + font + `;font-size:14px;line-height:1.6;` + ink + `}` +
 		`.od-body p{margin:0 0 12px}` +
 		`.od-body a{color:` + accent + `}` +
 		`.od-body h1,.od-body h2,.od-body h3{margin:16px 0 8px;line-height:1.3}` +
 		`.od-body ul,.od-body ol{margin:0 0 12px;padding-left:22px}` +
-		`.od-body blockquote{margin:0 0 12px;padding-left:12px;border-left:3px solid #E5E5E5;color:#525252}` +
-		`.od-body code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:#F5F5F5;border-radius:4px;padding:1px 4px}` +
-		`.od-body pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:#F5F5F5;border-radius:6px;padding:10px 12px;white-space:pre-wrap}` +
+		`.od-body blockquote{margin:0 0 12px;padding-left:12px;border-left:3px solid ` + rule + `;` + quote + `}` +
+		`.od-body code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:` + soft + `;border-radius:4px;padding:1px 4px}` +
+		`.od-body pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:` + soft + `;border-radius:6px;padding:10px 12px;white-space:pre-wrap}` +
 		`.od-body img{max-width:100%;height:auto}` +
-		`.od-history blockquote{border-left:2px solid #D4D4D4}` +
+		`.od-history blockquote{border-left:2px solid ` + rule + `}` +
 		`@media (max-width:620px){.od-pad{padding-left:18px!important;padding-right:18px!important}}`
 }
 
@@ -185,7 +198,11 @@ func simpleBody(o LayoutOptions, c *Context, accent, font string, p Parts, foote
 	var b strings.Builder
 	sig := ""
 	if strings.TrimSpace(p.Signature) != "" {
-		sig = `<div class="od-signature" style="margin-top:20px;color:#404040">` + p.Signature + `</div>`
+		tint := ""
+		if o.Style == "branded" {
+			tint = ";color:#404040"
+		}
+		sig = `<div class="od-signature" style="margin-top:20px` + tint + `">` + p.Signature + `</div>`
 	}
 	if o.Style == "branded" {
 		b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F4F4F5"><tr><td align="center" style="padding:28px 12px">`)
@@ -210,7 +227,7 @@ func simpleBody(o LayoutOptions, c *Context, accent, font string, p Parts, foote
 		b.WriteString(`</td></tr></table>`)
 		return b.String()
 	}
-	b.WriteString(`<div class="od-body" style="max-width:640px;padding:16px 20px;font-family:` + font + `;font-size:14px;line-height:1.6;color:#171717">`)
+	b.WriteString(`<div class="od-body" style="max-width:640px;font-family:` + font + `;font-size:14px;line-height:1.6">`)
 	if o.Logo {
 		if l := logoHTML(c, 28); l != "" {
 			b.WriteString(`<div style="margin:0 0 18px">` + l + `</div>`)
