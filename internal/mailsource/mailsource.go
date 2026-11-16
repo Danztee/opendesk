@@ -3,17 +3,59 @@
 package mailsource
 
 import (
+	"io"
+	"net/http"
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/useopendesk/opendesk/internal/httpx"
 )
 
 const (
 	// ViewBytes is how much of a source the app shows; the download is the whole message.
 	ViewBytes = 1 << 20
-	// MaxBytes is the largest source read at all (a mail with its attachments).
-	MaxBytes = 40 << 20
+	// MaxBytes is the largest raw message opendesk keeps: inbound mail and Collab sync refuse
+	// or skip a larger one, so every stored source fits.
+	MaxBytes = 30 << 20
 )
+
+// TooLarge is the answer for a source over MaxBytes.
+func TooLarge() error {
+	return httpx.E(http.StatusRequestEntityTooLarge, "too_large", "This message is too large to show its source.")
+}
+
+// ReadAll reads a whole source from r for its download.
+func ReadAll(r io.Reader) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, MaxBytes+1))
+	if err != nil {
+		return nil, httpx.Wrap(err)
+	}
+	if len(raw) > MaxBytes {
+		return nil, TooLarge()
+	}
+	return raw, nil
+}
+
+// Read is View for a source read from r, keeping only what is shown in memory and counting
+// the rest.
+func Read(r io.Reader) (MailSource, error) {
+	head, err := io.ReadAll(io.LimitReader(r, ViewBytes+1))
+	if err != nil {
+		return MailSource{}, httpx.Wrap(err)
+	}
+	rest, err := io.Copy(io.Discard, io.LimitReader(r, MaxBytes+1-int64(len(head))))
+	if err != nil {
+		return MailSource{}, httpx.Wrap(err)
+	}
+	size := len(head) + int(rest)
+	if size > MaxBytes {
+		return MailSource{}, TooLarge()
+	}
+	out := View(head)
+	out.SizeBytes = size
+	return out, nil
+}
 
 // MailSource is a message's source as the app shows it.
 type MailSource struct {

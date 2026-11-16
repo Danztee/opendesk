@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@/i18n";
 import { i18n } from "@/i18n";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ApiError } from "@/lib/api/client";
 import type { MailSource } from "@/lib/api/types";
 import { SourceDialog, splitSource } from "./SourceDialog";
 
@@ -67,9 +68,16 @@ describe("message source", () => {
   });
 
   it("says plainly when a message has no source", async () => {
-    await show(() => Promise.reject(new Error("404")));
+    await show(() => Promise.reject(new ApiError({ status: 404, code: "not_found", detail: "Message source not found" })));
     expect(document.body.textContent).toContain("isn't available");
     expect(document.querySelector('[data-testid="message-source"]')).toBeNull();
+  });
+
+  it("passes on the server's reason when the source could not be read", async () => {
+    const detail = "The message could not be read from the mail provider. Try again.";
+    await show(() => Promise.reject(new ApiError({ status: 502, code: "provider_error", detail })));
+    expect(document.body.textContent).toContain(detail);
+    expect(document.body.textContent).not.toContain("isn't available");
   });
 
   it("saves the whole message as a file under the name the server gave it", async () => {

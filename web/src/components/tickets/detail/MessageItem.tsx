@@ -564,7 +564,7 @@ export const MessageItem = memo(function MessageItem({
   const me = meUser?.id;
   const role = useRole();
   const admin = atLeast(role, "admin");
-  // An email that arrived at a mailbox keeps its raw source, which agents may read (contracts/api.md "Message source").
+  // An email that arrived at a mailbox keeps its raw source, which agents may read (contracts/api.md, `GET /v1/messages/{id}/source`).
   const hasSource = atLeast(role, "agent") && m.kind === "reply" && m.direction === "inbound" && !!m.mailbox_id && !m.deleted_at;
   const mine = !!me && m.author.user?.id === me;
   const editableNote = note && mine;

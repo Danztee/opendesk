@@ -74,6 +74,13 @@ func TestMailSourceView(t *testing.T) {
 	if !v.Truncated || v.SizeBytes != len(big) || len(v.Source) > mailsource.ViewBytes || !strings.HasSuffix(v.Source, "\n") {
 		t.Fatalf("truncated view: truncated=%v size=%d len=%d", v.Truncated, v.SizeBytes, len(v.Source))
 	}
+	// Read keeps only the shown part in memory and still counts the whole message.
+	if r, err := mailsource.Read(strings.NewReader(big)); err != nil || r != v {
+		t.Fatalf("Read = %+v, %v; want %+v", r.SizeBytes, err, v.SizeBytes)
+	}
+	if _, err := mailsource.Read(strings.NewReader(strings.Repeat("a", mailsource.MaxBytes+1))); err == nil {
+		t.Fatal("a source over the cap was read")
+	}
 	if got := mailsource.View([]byte("Subject: \xff\xfe bad\r\n")).Source; !strings.Contains(got, "�") {
 		t.Fatalf("invalid bytes were not replaced: %q", got)
 	}

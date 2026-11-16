@@ -1136,7 +1136,7 @@ interface MessageDetails {
 message read from its stored source, else the provider (`502 provider_error`), the first 1 MB as text,
 and `GET /v1/collab/messages/{id}/source.eml` the whole message as an `.eml` file (`message/rfc822`,
 `attachment`, `nosniff`, sandbox CSP). Both see the message as the thread does ("Who sees what"): a
-private account's mail is its member's alone. Sources over 40 MB are `413`. The details card has a
+private account's mail is its member's alone. A source over 30 MB, the most a synced message may be, is `413`. The details card has a
 **View source** link beside **Show original headers**; a draft has none.
 
 Only the receiving server's own `Authentication-Results` counts: the topmost one above a `Received`

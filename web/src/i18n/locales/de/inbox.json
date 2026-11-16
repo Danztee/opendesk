@@ -1162,6 +1162,7 @@
     "copy": "Quelltext kopieren",
     "close": "Schließen",
     "error": "Das Original dieser Nachricht ist nicht verfügbar. Nur E-Mails, die in einem Postfach eingegangen sind, behalten eines, und bei einer endgültig gelöschten Nachricht ist es weg.",
+    "loadError": "Die Originalnachricht konnte nicht geladen werden. Versuche es erneut.",
     "downloadError": "Die Nachricht konnte nicht heruntergeladen werden.",
     "truncated": "Es wird nur der erste Teil angezeigt. Der Download enthält die ganze Nachricht ({{size}} KB)."
   }

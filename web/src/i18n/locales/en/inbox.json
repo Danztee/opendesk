@@ -1166,6 +1166,7 @@
     "copy": "Copy source",
     "close": "Close",
     "error": "The original of this message isn't available. Only email that arrived at a mailbox keeps one, and a purged message's is gone.",
+    "loadError": "Couldn't load the original message. Try again.",
     "downloadError": "Couldn't download the message.",
     "truncated": "Only the first part is shown. The download has the whole message ({{size}} KB)."
   }

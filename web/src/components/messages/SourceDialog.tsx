@@ -10,7 +10,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Dialog } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
-import type { Download as DownloadedFile } from "@/lib/api/client";
+import { ApiError, errorMessage, type Download as DownloadedFile } from "@/lib/api/client";
 import type { MailSource } from "@/lib/api/types";
 
 /** The raw message split where the headers end: the first empty line. */
@@ -37,7 +37,7 @@ export function SourceDialog({
   file: () => Promise<DownloadedFile>;
 }) {
   const { t } = useTranslation("inbox");
-  const { data, isPending, isError } = useQuery({ queryKey, queryFn: load, enabled: open, staleTime: Infinity, retry: false });
+  const { data, isPending, isError, error } = useQuery({ queryKey, queryFn: load, enabled: open, staleTime: Infinity, retry: false });
   const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
@@ -81,7 +81,9 @@ export function SourceDialog({
           <Skeleton className="h-3 w-5/6" />
         </div>
       ) : isError || !parts ? (
-        <p className="text-[12.5px] text-fg-3">{t("source.error")}</p>
+        <p className="text-[12.5px] text-fg-3">
+          {error instanceof ApiError && error.status === 404 ? t("source.error") : errorMessage(error, t("source.loadError"))}
+        </p>
       ) : (
         <div className="relative">
           <CopyButton value={data.source} label={t("source.copy")} className="absolute right-1.5 top-1.5 bg-surface" />

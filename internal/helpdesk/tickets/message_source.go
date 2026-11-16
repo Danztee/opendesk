@@ -19,10 +19,10 @@ import (
 	"github.com/useopendesk/opendesk/internal/storage"
 )
 
-// messageSource reads the raw email a message came from (contracts/api.md "Message source"). It is
+// messageSource opens the raw email a message came from (contracts/api.md, `GET /v1/messages/{id}/source`). It is
 // the same visibility as the message: a hidden ticket, a deleted message (admins only) and
 // a message that did not arrive by email, or whose source was purged, are 404.
-func messageSource(ctx context.Context, d *deps.Deps, p *auth.Principal, rawID string) ([]byte, string, error) {
+func messageSource(ctx context.Context, d *deps.Deps, p *auth.Principal, rawID string) (io.ReadCloser, string, error) {
 	id, err := hd.ParseID(rawID, "Message")
 	if err != nil {
 		return nil, "", err
@@ -50,15 +50,7 @@ func messageSource(ctx context.Context, d *deps.Deps, p *auth.Principal, rawID s
 	if err != nil {
 		return nil, "", httpx.Wrap(err)
 	}
-	defer rc.Close()
-	raw, err := io.ReadAll(io.LimitReader(rc, mailsource.MaxBytes+1))
-	if err != nil {
-		return nil, "", httpx.Wrap(err)
-	}
-	if len(raw) > mailsource.MaxBytes {
-		return nil, "", httpx.E(http.StatusRequestEntityTooLarge, "too_large", "This message is too large to show its source.")
-	}
-	return raw, subject, nil
+	return rc, subject, nil
 }
 
 func registerMessageSource(d *deps.Deps, api huma.API) {
@@ -73,11 +65,16 @@ func registerMessageSource(d *deps.Deps, api huma.API) {
 			if err != nil {
 				return nil, httpx.Wrap(err)
 			}
-			raw, _, err := messageSource(ctx, d, p, in.ID)
+			rc, _, err := messageSource(ctx, d, p, in.ID)
 			if err != nil {
 				return nil, err
 			}
-			return &struct{ Body mailsource.MailSource }{mailsource.View(raw)}, nil
+			defer rc.Close()
+			src, err := mailsource.Read(rc)
+			if err != nil {
+				return nil, err
+			}
+			return &struct{ Body mailsource.MailSource }{src}, nil
 		})
 	huma.Register(api, huma.Operation{OperationID: "download-message-source", Method: http.MethodGet, Path: "/v1/messages/{id}/source.eml",
 		Summary: "Download the original email of a message", Tags: tags,
@@ -89,7 +86,12 @@ func registerMessageSource(d *deps.Deps, api huma.API) {
 			if err != nil {
 				return nil, httpx.Wrap(err)
 			}
-			raw, subject, err := messageSource(ctx, d, p, in.ID)
+			rc, subject, err := messageSource(ctx, d, p, in.ID)
+			if err != nil {
+				return nil, err
+			}
+			defer rc.Close()
+			raw, err := mailsource.ReadAll(rc)
 			if err != nil {
 				return nil, err
 			}
