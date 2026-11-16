@@ -120,9 +120,14 @@ may (the roles that can work tickets at all); two settings narrow it:
 
 - `min_role` (`agent`, the default, or `admin`): `admin` lets only admins and owners act.
 - `allowed_user_ids` (at most 100 members, each an agent, admin or owner of the workspace; `422`
-  otherwise): when not empty, only those people may act, and only if they also meet `min_role`. An
-  empty list lets everyone with the role. A person who is removed from the workspace or loses the role
-  simply stops matching.
+  otherwise): when not empty, only those people may act. An empty list lets everyone with the role.
+  The two are one or the other: `min_role` `admin` with a non-empty list is `422`.
+
+A person on the list who is removed from the workspace or becomes a viewer stops matching at once. They
+stay on the stored list, and if they are added back as an agent or admin they regain access unless an
+admin has taken them off it. Saving the list drops anyone on it who no longer qualifies instead of
+refusing the save; a newly added id that does not qualify is still `422`, and so is a save that would
+drop everyone (an empty list would let everyone with the role).
 
 "Acting" is everything a person does in a thread: typed commands (`reply`, `note`, `assign`, `status`,
 `priority`), a press of a card's or a preview's button, asking Ollie, and asking Ollie to create a

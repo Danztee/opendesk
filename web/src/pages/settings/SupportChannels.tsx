@@ -614,9 +614,11 @@ function AccessDialog({ destination, onClose }: { destination: SupportChannelDes
   const [error, setError] = useState("");
   const name = destination.external_channel_name || destination.external_channel_id;
   const workers = (members ?? []).filter((m) => m.role !== "viewer");
+  // Only current agents and admins can be chosen: someone who left or became a viewer is not sent.
+  const picked = chosen.filter((id) => workers.some((m) => m.user.id === id));
   const save = useMutation({
     mutationFn: () =>
-      api.supportChannels.updateDestination(destination.id, who === "chosen" ? { min_role: "agent", allowed_user_ids: chosen } : { min_role: who === "admins" ? "admin" : "agent", allowed_user_ids: [] }),
+      api.supportChannels.updateDestination(destination.id, who === "chosen" ? { min_role: "agent", allowed_user_ids: picked } : { min_role: who === "admins" ? "admin" : "agent", allowed_user_ids: [] }),
     onSuccess: (row) => {
       upsertInList(qc, qk.supportChannelDestinations, row);
       toast.success(t("supportChannels.access.saved"));
@@ -633,7 +635,7 @@ function AccessDialog({ destination, onClose }: { destination: SupportChannelDes
       footer={
         <>
           <Button onClick={onClose}>{t("supportChannels.access.cancel")}</Button>
-          <Button variant="primary" disabled={who === "chosen" && chosen.length === 0} loading={save.isPending} onClick={() => save.mutate()}>
+          <Button variant="primary" disabled={who === "chosen" && picked.length === 0} loading={save.isPending} onClick={() => save.mutate()}>
             {t("supportChannels.access.submit")}
           </Button>
         </>

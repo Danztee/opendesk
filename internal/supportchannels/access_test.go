@@ -2,6 +2,7 @@ package supportchannels
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -123,14 +124,33 @@ func TestDestinationAccessAPI(t *testing.T) {
 	if got.MinRole != roleAgent || len(got.AllowedUserIDs) != 2 {
 		t.Fatalf("access = %+v", got)
 	}
+	// Someone on the list who stops working tickets is dropped when the list is saved again; adding
+	// them back is refused, and so is a save that would drop everyone (an empty list lets all).
+	role := func(id uuid.UUID, r string) {
+		e.Exec(`UPDATE members SET role = $3 WHERE workspace_id = $1 AND user_id = $2`, ws.ID, id, r)
+	}
+	role(ws.Agent.ID, "viewer")
+	if got := patch(map[string]any{"allowed_user_ids": []string{ws.Agent.ID.String(), ws.Admin.ID.String()}}, http.StatusOK); !slices.Equal(got.AllowedUserIDs, []uuid.UUID{ws.Admin.ID}) {
+		t.Fatalf("list after a demotion = %v", got.AllowedUserIDs)
+	}
+	patch(map[string]any{"allowed_user_ids": []string{ws.Agent.ID.String(), ws.Admin.ID.String()}}, http.StatusUnprocessableEntity)
+	role(ws.Agent.ID, "agent")
+	patch(map[string]any{"allowed_user_ids": []string{ws.Agent.ID.String()}}, http.StatusOK)
+	role(ws.Agent.ID, "viewer")
+	patch(map[string]any{"allowed_user_ids": []string{ws.Agent.ID.String()}}, http.StatusUnprocessableEntity)
+	role(ws.Agent.ID, "agent")
+	// Admins only and a list are one or the other.
+	patch(map[string]any{"min_role": "admin"}, http.StatusUnprocessableEntity)
+	patch(map[string]any{"min_role": "admin", "allowed_user_ids": []string{ws.Admin.ID.String()}}, http.StatusUnprocessableEntity)
+	e.Do(http.MethodPost, path, ws.Admin.As(ws), map[string]any{"connection_id": connectionID.String(), "external_channel_id": "C2", "min_role": "admin", "allowed_user_ids": []string{ws.Admin.ID.String()}}).Want(t, http.StatusUnprocessableEntity)
 	// An empty list lets everyone with the role again, and the change is audited.
 	if got := patch(map[string]any{"allowed_user_ids": []string{}}, http.StatusOK); len(got.AllowedUserIDs) != 0 {
 		t.Fatalf("list = %v", got.AllowedUserIDs)
 	}
 	var n int
 	e.Scalar(`SELECT count(*) FROM audit_logs WHERE workspace_id = $1 AND action = 'support_channel.destination_updated' AND data::text LIKE '%allowed_user_ids%'`, &n, ws.ID)
-	if n != 2 {
-		t.Fatalf("%d audit entries for access changes, want 2", n)
+	if n != 4 {
+		t.Fatalf("%d audit entries for access changes, want 4", n)
 	}
 	// Only an admin person sets it.
 	e.Do(http.MethodPatch, one, ws.Agent.As(ws), map[string]any{"min_role": "admin"}).Want(t, http.StatusForbidden)

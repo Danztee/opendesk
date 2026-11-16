@@ -402,6 +402,7 @@ describe("mock backend", () => {
     expect((await call("PATCH", url, { min_role: "admin" })).body).toMatchObject({ min_role: "admin" });
     const picked = await call("PATCH", url, { min_role: "agent", allowed_user_ids: ["u1", "u1", "u2"] });
     expect(picked.body).toMatchObject({ min_role: "agent", allowed_user_ids: ["u1", "u2"] });
+    expect((await call("PATCH", url, { min_role: "admin" })).status).toBe(422);
     expect((await call("PATCH", url, { allowed_user_ids: [] })).body.allowed_user_ids).toEqual([]);
     expect((await call("DELETE", `/v1/support-channels/connections/${created.body.id}`)).status).toBe(204);
   });
