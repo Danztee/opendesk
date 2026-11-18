@@ -2545,6 +2545,8 @@ export type Suggestion = {
   probability: number | null;
   model: string;
   decided_at: string;
+  /** Why it was not applied; absent on older suggestions. */
+  reason?: "below_threshold" | "field_off" | "not_on_team";
 };
 export type AISuggestions = Partial<Record<SuggestionField, Suggestion>>;
 export type KBSource = { article_id: string; title: string; url: string };
