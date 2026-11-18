@@ -36,7 +36,7 @@ func contactWriteTools() []*tool {
 				"external_id": strN("Your own system's id for this person.", 1, 200),
 				"labels":      arr("Label names to give the contact.", strN("", 1, 50), 50),
 				"notes":       strN("Notes for the team, in plain text.", 1, 10000),
-				"fields":      fieldsArg("Custom field values, by key."),
+				"fields":      entityFields("contact", "Custom field values, by key."),
 			}),
 			Run: createContact,
 		},
@@ -54,7 +54,7 @@ func contactWriteTools() []*tool {
 				"add_labels":    arr("Label names to add.", strN("", 1, 50), 50),
 				"remove_labels": arr("Label names to remove.", strN("", 1, 50), 50),
 				"notes":         str("Notes for the team, replacing the old ones; an empty string clears them."),
-				"fields":        fieldsArg("Custom field values to change, by key; the others keep theirs. null clears a field."),
+				"fields":        entityFields("contact", "Custom field values to change, by key; the others keep theirs. null clears a field."),
 			}, "contact"),
 			Run: updateContact,
 		},
@@ -68,7 +68,7 @@ func contactWriteTools() []*tool {
 				"external_id": strN("Your own system's id for this account.", 1, 200),
 				"labels":      arr("Label names to give the company.", strN("", 1, 50), 50),
 				"notes":       strN("Notes for the team, in plain text.", 1, 10000),
-				"fields":      fieldsArg("Custom field values, by key."),
+				"fields":      entityFields("company", "Custom field values, by key."),
 			}, "name"),
 			Run: createCompany,
 		},
@@ -84,7 +84,7 @@ func contactWriteTools() []*tool {
 				"add_labels":    arr("Label names to add.", strN("", 1, 50), 50),
 				"remove_labels": arr("Label names to remove.", strN("", 1, 50), 50),
 				"notes":         str("Notes for the team, replacing the old ones; an empty string clears them."),
-				"fields":        fieldsArg("Custom field values to change, by key; the others keep theirs. null clears a field."),
+				"fields":        entityFields("company", "Custom field values to change, by key; the others keep theirs. null clears a field."),
 			}, "company"),
 			Run: updateCompany,
 		},
@@ -104,6 +104,13 @@ func contactWriteTools() []*tool {
 			Run:         getCompany,
 		},
 	}
+}
+
+// entityFields is fieldsArg for a contact's or a company's fields.
+func entityFields(entity, desc string) map[string]any {
+	m := fieldsArg(desc)
+	m["description"] = strings.Replace(m["description"].(string), "(entity ticket)", "(entity "+entity+")", 1)
+	return m
 }
 
 type apiCompany struct {
